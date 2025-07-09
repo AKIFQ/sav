@@ -1,0 +1,1 @@
+"""Shadow VCS - A local-first staging VCS for AI agents.""" 

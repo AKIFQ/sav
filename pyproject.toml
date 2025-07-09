@@ -1,0 +1,32 @@
+[project]
+name = "zed-shadow-vcs"
+version = "0.1.0"
+description = "A local-first staging VCS for AI agents - quarantine commits before merging to production Git"
+authors = [{name = "Shadow VCS Contributors"}]
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1.0",
+    "ruamel.yaml>=0.18.0",
+    "filelock>=3.13.0",
+]
+
+[project.scripts]
+zed = "zed.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+
+[tool.black]
+line-length = 88
+target-version = ['py311'] 
