@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .
+        pip install pytest
+    
+    - name: Run tests
+      run: |
+        pytest tests/ -v
+    
+    - name: Test CLI commands
+      run: |
+        # Test basic CLI functionality
+        mkdir test_cli_workspace
+        cd test_cli_workspace
+        
+        # Test init
+        zed init
+        
+        # Create test file
+        echo "print('Hello Shadow VCS')" > hello.py
+        
+        # Test commit
+        zed commit -m "Test commit" hello.py
+        
+        # Test status
+        zed status --all
+        
+        cd ..
+        rm -rf test_cli_workspace 
