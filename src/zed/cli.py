@@ -17,8 +17,37 @@ from zed.core.repo import Repository
 @click.group()
 @click.version_option(version="0.1.0", prog_name="zed")
 def cli():
-    """Shadow VCS - A local-first staging VCS for AI agents."""
+    """Shadow VCS - A local-first staging VCS for AI agents.
+    
+    Provides isolation, provenance, and policy enforcement for AI-generated code.
+    
+    \b
+    Quick Start:
+      zed init                    # Initialize repository
+      zed commit -m "msg" file.py # Create commit
+      zed status                  # Check pending reviews
+      zed review <commit-id>      # Review changes
+      zed approve <commit-id>     # Apply to working tree
+    
+    \b
+    Learn more: https://github.com/AKIFQ/zed
+    """
     pass
+
+
+@cli.command()
+def version():
+    """Show detailed version information."""
+    import platform
+    import sqlite3
+    
+    click.echo("Shadow VCS (zed) version 0.1.0")
+    click.echo(f"Python {platform.python_version()} on {platform.system()}")
+    click.echo(f"SQLite {sqlite3.sqlite_version}")
+    click.echo()
+    click.echo("A local-first staging VCS for AI agents")
+    click.echo("Repository: https://github.com/AKIFQ/zed")
+    click.echo("License: MIT")
 
 
 @cli.command()
@@ -30,13 +59,28 @@ def cli():
     help="Path to initialize the Shadow VCS repository",
 )
 def init(path: Path):
-    """Initialize a new Shadow VCS repository."""
+    """Initialize a new Shadow VCS repository.
+    
+    \b
+    Examples:
+      zed init                    # Initialize in current directory
+      zed init /path/to/project   # Initialize in specific directory
+    """
     try:
         repo = Repository(path)
         repo.init()
-        click.echo(f"Initialized Shadow VCS repository in {path.resolve()}/.zed")
+        click.echo(f"✅ Initialized Shadow VCS repository in {path.resolve()}/.zed")
+        click.echo()
+        click.echo("Next steps:")
+        click.echo("  1. Make some changes to your files")
+        click.echo("  2. Run: zed commit -m 'Your message' <files>")
+        click.echo("  3. Check status: zed status")
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        if "already exists" in str(e):
+            click.echo(f"❌ Error: {e}", err=True)
+            click.echo("💡 Tip: Use 'zed status' to see existing commits", err=True)
+        else:
+            click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
 
 
@@ -60,7 +104,14 @@ def init(path: Path):
     type=click.Path(exists=True, path_type=Path),
 )
 def commit(message: str, author: str, files: tuple[Path, ...]):
-    """Create a new commit with specified files."""
+    """Create a new commit with specified files.
+    
+    \b
+    Examples:
+      zed commit -m "Add feature" src/feature.py
+      zed commit -m "Update docs" README.md docs/
+      zed commit -m "AI: Refactored auth" -a "gpt-4" auth.py
+    """
     try:
         # Find repository
         repo = _find_repository()
@@ -91,12 +142,15 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
         if policy_result["approved"]:
             status = "approved"
             status_msg = "auto-approved by policy"
+            status_icon = "✅"
         elif policy_result["require_role"]:
             status = "waiting_review"
             status_msg = f"requires {policy_result['require_role']} approval"
+            status_icon = "⚠️"
         else:
             status = "waiting_review"
             status_msg = "requires review"
+            status_icon = "⏳"
         
         # Update commit status if auto-approved
         if status == "approved":
@@ -109,13 +163,26 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
                 )
                 conn.commit()
         
-        click.echo(f"Created commit {commit.id[:8]} ({status_msg})")
-        click.echo(f"  Files: {len(file_list)}")
-        click.echo(f"  Lines: +{fingerprint.lines_added} -{fingerprint.lines_deleted}")
-        click.echo(f"  Risk score: {fingerprint.risk_score}")
+        click.echo(f"{status_icon} Created commit {click.style(commit.id[:8], fg='cyan')} ({status_msg})")
+        click.echo(f"  📁 Files: {len(file_list)}")
+        click.echo(f"  📊 Lines: +{fingerprint.lines_added} -{fingerprint.lines_deleted}")
+        click.echo(f"  ⚡ Risk score: {fingerprint.risk_score}")
         
+        if status == "waiting_review":
+            click.echo()
+            click.echo("💡 Next steps:")
+            click.echo(f"  zed review {commit.id[:8]}   # Review changes")
+            click.echo(f"  zed approve {commit.id[:8]}  # Apply to working tree")
+        
+    except ValueError as e:
+        if "Not in a Shadow VCS repository" in str(e):
+            click.echo("❌ Error: Not in a Shadow VCS repository", err=True)
+            click.echo("💡 Tip: Run 'zed init' to initialize a repository", err=True)
+        else:
+            click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+        click.echo(f"❌ Error: {e}", err=True)
         sys.exit(1)
 
 
@@ -127,7 +194,13 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
     help="Show all commits (default shows only pending)",
 )
 def status(all: bool):
-    """Show status of commits."""
+    """Show status of commits.
+    
+    \b
+    Examples:
+      zed status          # Show pending reviews
+      zed status --all    # Show all commits
+    """
     try:
         repo = _find_repository()
         
@@ -148,22 +221,37 @@ def status(all: bool):
             
             if not commits:
                 if all:
-                    click.echo("No commits found.")
+                    click.echo("📭 No commits found.")
                 else:
-                    click.echo("No commits waiting for review.")
+                    click.echo("✨ No commits waiting for review.")
+                    click.echo()
+                    click.echo("💡 Tip: Create a commit with 'zed commit -m \"message\" <files>'")
                 return
+            
+            # Display header
+            if all:
+                click.echo("📋 All commits:")
+            else:
+                click.echo("⏳ Commits waiting for review:")
+            click.echo()
             
             # Display commits
             for commit in commits:
                 timestamp = time.strftime("%Y-%m-%d %H:%M", time.localtime(commit["timestamp"]))
                 status_color = {
                     "waiting_review": "yellow",
-                    "approved": "green",
+                    "approved": "green", 
                     "rejected": "red",
                 }.get(commit["status"], "white")
                 
+                status_icon = {
+                    "waiting_review": "⏳",
+                    "approved": "✅",
+                    "rejected": "❌",
+                }.get(commit["status"], "❓")
+                
                 click.echo(
-                    f"{click.style(commit['id'][:8], fg='cyan')} "
+                    f"  {status_icon} {click.style(commit['id'][:8], fg='cyan')} "
                     f"{click.style(commit['status'], fg=status_color)} "
                     f"{timestamp} {commit['author']}: {commit['message']}"
                 )
@@ -176,7 +264,13 @@ def status(all: bool):
 @cli.command()
 @click.argument("commit_id")
 def review(commit_id: str):
-    """Review a commit by showing its details."""
+    """Review a commit by showing its details.
+    
+    \b
+    Examples:
+      zed review abc123           # Review commit abc123
+      zed review abc123 | less    # Pipe to pager for large diffs
+    """
     try:
         repo = _find_repository()
         
@@ -240,7 +334,13 @@ def review(commit_id: str):
     help="User approving the commit",
 )
 def approve(commit_id: str, user: str):
-    """Approve a commit and apply it to the working tree."""
+    """Approve a commit and apply it to the working tree.
+    
+    \b
+    Examples:
+      zed approve abc123          # Approve with current user
+      zed approve abc123 -u john  # Approve as specific user
+    """
     try:
         repo = _find_repository()
         
@@ -300,8 +400,10 @@ def approve(commit_id: str, user: str):
             
             conn.commit()
         
-        click.echo(f"Approved commit {commit.id[:8]}")
-        click.echo(f"Applied {len(copied_files)} files to working tree")
+        click.echo(f"✅ Approved commit {click.style(commit.id[:8], fg='cyan')}")
+        click.echo(f"📁 Applied {len(copied_files)} files to working tree")
+        click.echo()
+        click.echo("💡 Changes are now live in your working directory!")
         
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
@@ -322,7 +424,13 @@ def approve(commit_id: str, user: str):
     help="Reason for rejection",
 )
 def reject(commit_id: str, user: str, reason: Optional[str]):
-    """Reject a commit."""
+    """Reject a commit.
+    
+    \b
+    Examples:
+      zed reject abc123                       # Reject with current user
+      zed reject abc123 -r "Security issue"  # Reject with reason
+    """
     try:
         repo = _find_repository()
         
@@ -373,7 +481,9 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
             
             conn.commit()
         
-        click.echo(f"Rejected commit {commit.id[:8]}")
+        click.echo(f"❌ Rejected commit {click.style(commit.id[:8], fg='cyan')}")
+        if reason:
+            click.echo(f"📝 Reason: {reason}")
         
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
