@@ -1,4 +1,4 @@
-# Shadow VCS v0.1
+# ZED - Shasow VCS v0.1
 
 A local-first "staging VCS" that lets AI agents commit code safely *outside* a production Git repository.
 
