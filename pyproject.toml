@@ -1,5 +1,5 @@
 [project]
-name = "zed-shadow-vcs"
+name = "zedai"
 version = "0.1.0"
 description = "A local-first staging VCS for AI agents - quarantine commits before merging to production Git"
 authors = [{name = "Shadow VCS Contributors"}]

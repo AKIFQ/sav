@@ -165,6 +165,41 @@ class FingerprintGenerator:
             for pattern in compiled_patterns:
                 if pattern.search(file_str):
                     return True
+            
+            # Check file content for secrets
+            if file_path.exists() and file_path.is_file():
+                try:
+                    content = file_path.read_text(encoding='utf-8', errors='ignore')
+                    if self._check_content_for_secrets(content):
+                        return True
+                except (UnicodeDecodeError, OSError):
+                    # Skip files that can't be read as text
+                    pass
+        
+        return False
+
+    def _check_content_for_secrets(self, content: str) -> bool:
+        """Check file content for embedded secrets."""
+        # GitHub tokens
+        if re.search(r'ghp_[a-zA-Z0-9]{36}', content):
+            return True
+        
+        # Generic API tokens
+        if re.search(r'[a-zA-Z0-9]{32,}', content):
+            return True
+        
+        # AWS access keys
+        if re.search(r'AKIA[0-9A-Z]{16}', content):
+            return True
+        
+        # Private keys
+        if re.search(r'-----BEGIN PRIVATE KEY-----', content):
+            return True
+        
+        # Large base64 content (potential model weights)
+        base64_pattern = r'[A-Za-z0-9+/]{1000,}={0,2}'
+        if re.search(base64_pattern, content):
+            return True
         
         return False
 
@@ -202,6 +237,36 @@ class FingerprintGenerator:
         binary_count = sum(1 for f in files if f.exists() and is_binary_file(f))
         if binary_count > 0:
             risk += 0.3
+        
+        # Risk for large embedded content
+        for file_path in files:
+            if file_path.exists() and file_path.is_file():
+                try:
+                    content = file_path.read_text(encoding='utf-8', errors='ignore')
+                    # Check for large base64 content
+                    if len(content) > 100000:  # 100KB threshold
+                        risk += 0.3
+                        break
+                    # Check for embedded large strings
+                    if re.search(r'[A-Za-z0-9+/]{50000,}={0,2}', content):
+                        risk += 0.4
+                        break
+                except (UnicodeDecodeError, OSError):
+                    pass
+        
+        # Risk for Python files with suspicious patterns
+        for file_path in files:
+            if file_path.suffix == '.py':
+                try:
+                    content = file_path.read_text(encoding='utf-8', errors='ignore')
+                    # Check for hardcoded secrets
+                    if re.search(r'["\'](ghp_|sk_|pk_)[a-zA-Z0-9]{20,}["\']', content):
+                        risk += 0.3
+                    # Check for missing return statements (potential bugs)
+                    if re.search(r'if\s+.*:\s*\n\s*return\s+True\s*\n\s*#.*missing.*return', content, re.IGNORECASE):
+                        risk += 0.2
+                except (UnicodeDecodeError, OSError):
+                    pass
         
         # Reduce risk if tests passed
         if tests_passed:

@@ -85,6 +85,9 @@ class CommitManager:
         """Ensure file path is safe and within repository bounds."""
         try:
             resolved = file_path.resolve()
+            # Disallow symlinks to prevent symlink bypass
+            if file_path.is_symlink():
+                raise ValueError(f"Symlinks are not allowed: {file_path}")
             repo_root = self.repo.path.resolve()
             
             # Check if file is within repository
@@ -149,16 +152,25 @@ class CommitManager:
                         "relative": str(relative_path),
                         "stored": str(dest_path.relative_to(commit_dir))
                     })
-
-                # Generate diffs
+                # Generate diffs against the stable shadow copy to avoid race conditions
                 diff_data = []
                 total_lines_added = 0
                 total_lines_deleted = 0
-                
-                for file_path in files:
-                    relative_path = file_path.relative_to(self.repo.path) if file_path.is_relative_to(self.repo.path) else file_path.name
-                    # For now, treat all files as new (no comparison with working tree)
-                    diff_info = generate_file_diff(None, file_path, self.repo.path)
+
+                for fm in file_mappings:
+                    shadow_file = commit_dir / fm["stored"]
+                    # Pre-size guard before reading file
+                    size = shadow_file.stat().st_size
+                    max_size = self.config.security.max_file_size_mb * 1024 * 1024
+                    if size > max_size:
+                        size_mb = size / (1024 * 1024)
+                        limit_mb = self.config.security.max_file_size_mb
+                        raise ValueError(
+                            f"File too large: {shadow_file} ({size_mb:.1f}MB) "
+                            f"exceeds limit ({limit_mb}MB). Use Git LFS for large files."
+                        )
+                    # Generate diff from empty (new file) to shadow copy
+                    diff_info = generate_file_diff(None, shadow_file, commit_dir)
                     diff_data.append(diff_info)
                     total_lines_added += diff_info["lines_added"]
                     total_lines_deleted += diff_info["lines_deleted"]

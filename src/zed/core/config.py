@@ -24,9 +24,9 @@ class SecurityConfig:
     max_file_size_mb: int = 10
     allow_binary_files: bool = True
     enable_path_validation: bool = True
-    auto_apply_enabled: bool = True
-    auto_apply_risk_threshold: float = 0.1
-    auto_apply_max_lines: int = 10
+    auto_apply_enabled: bool = False  # Disabled for v0.1 safety
+    auto_apply_risk_threshold: float = 0.05  # Very low threshold
+    auto_apply_max_lines: int = 5  # Very conservative
     auto_apply_file_patterns: list = field(default_factory=lambda: ["*.md", "*.txt", "*.rst"])
 
 
