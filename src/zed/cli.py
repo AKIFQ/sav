@@ -13,6 +13,28 @@ from zed.core.fingerprint import FingerprintGenerator
 from zed.core.policy import PolicyManager
 from zed.core.repo import Repository
 
+# Standardized exit codes
+EXIT_SUCCESS = 0
+EXIT_ERROR = 1
+EXIT_USER_ERROR = 2  # User input errors
+EXIT_SYSTEM_ERROR = 3  # System/environment errors
+
+
+def handle_error(error: Exception, operation: str):
+    """Standardized error handling with consistent exit codes."""
+    if isinstance(error, ValueError):
+        click.echo(f"❌ Error: {error}", err=True)
+        sys.exit(EXIT_USER_ERROR)
+    elif isinstance(error, FileNotFoundError):
+        click.echo(f"❌ File not found during {operation}: {error}", err=True)
+        sys.exit(EXIT_USER_ERROR)
+    elif isinstance(error, PermissionError):
+        click.echo(f"❌ Permission denied during {operation}: {error}", err=True)
+        sys.exit(EXIT_SYSTEM_ERROR)
+    else:
+        click.echo(f"❌ Unexpected error during {operation}: {error}", err=True)
+        sys.exit(EXIT_ERROR)
+
 
 @click.group()
 @click.version_option(version="0.1.0", prog_name="zed")
@@ -79,9 +101,9 @@ def init(path: Path):
         if "already exists" in str(e):
             click.echo(f"❌ Error: {e}", err=True)
             click.echo("💡 Tip: Use 'zed status' to see existing commits", err=True)
+            sys.exit(EXIT_USER_ERROR)
         else:
-            click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
+            handle_error(e, "init")
 
 
 @cli.command()
@@ -174,16 +196,8 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
             click.echo(f"  zed review {commit.id[:8]}   # Review changes")
             click.echo(f"  zed approve {commit.id[:8]}  # Apply to working tree")
         
-    except ValueError as e:
-        if "Not in a Shadow VCS repository" in str(e):
-            click.echo("❌ Error: Not in a Shadow VCS repository", err=True)
-            click.echo("💡 Tip: Run 'zed init' to initialize a repository", err=True)
-        else:
-            click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
     except Exception as e:
-        click.echo(f"❌ Error: {e}", err=True)
-        sys.exit(1)
+        handle_error(e, "commit")
 
 
 @cli.command()
@@ -257,8 +271,7 @@ def status(all: bool):
                 )
                 
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        handle_error(e, "status")
 
 
 @cli.command()
@@ -280,8 +293,8 @@ def review(commit_id: str):
         commit = commit_mgr.get_commit(commit_id)
         
         if not commit:
-            click.echo(f"Error: Commit {commit_id[:8]} not found", err=True)
-            sys.exit(1)
+            click.echo(f"❌ Commit {commit_id[:8]} not found", err=True)
+            sys.exit(EXIT_USER_ERROR)
         
         # Get fingerprint
         fingerprint_gen = FingerprintGenerator(repo)
@@ -321,8 +334,7 @@ def review(commit_id: str):
             click.echo("-" * 60)
             
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        handle_error(e, "review")
 
 
 @cli.command()
@@ -350,16 +362,16 @@ def approve(commit_id: str, user: str):
         commit = commit_mgr.get_commit(commit_id)
         
         if not commit:
-            click.echo(f"Error: Commit {commit_id[:8]} not found", err=True)
-            sys.exit(1)
+            click.echo(f"❌ Commit {commit_id[:8]} not found", err=True)
+            sys.exit(EXIT_USER_ERROR)
         
         if commit.status == "approved":
-            click.echo(f"Commit {commit_id[:8]} is already approved", err=True)
-            sys.exit(1)
+            click.echo(f"❌ Commit {commit_id[:8]} is already approved", err=True)
+            sys.exit(EXIT_USER_ERROR)
         
         if commit.status == "rejected":
-            click.echo(f"Commit {commit_id[:8]} has been rejected", err=True)
-            sys.exit(1)
+            click.echo(f"❌ Commit {commit_id[:8]} has been rejected", err=True)
+            sys.exit(EXIT_USER_ERROR)
         
         # Copy files to working tree
         commit_dir = repo.commits_dir / commit.id
@@ -406,8 +418,7 @@ def approve(commit_id: str, user: str):
         click.echo("💡 Changes are now live in your working directory!")
         
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        handle_error(e, "approve")
 
 
 @cli.command()
@@ -440,16 +451,16 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
         commit = commit_mgr.get_commit(commit_id)
         
         if not commit:
-            click.echo(f"Error: Commit {commit_id[:8]} not found", err=True)
-            sys.exit(1)
+            click.echo(f"❌ Commit {commit_id[:8]} not found", err=True)
+            sys.exit(EXIT_USER_ERROR)
         
         if commit.status == "approved":
-            click.echo(f"Commit {commit_id[:8]} is already approved", err=True)
-            sys.exit(1)
+            click.echo(f"❌ Commit {commit_id[:8]} is already approved", err=True)
+            sys.exit(EXIT_USER_ERROR)
         
         if commit.status == "rejected":
-            click.echo(f"Commit {commit_id[:8]} is already rejected", err=True)
-            sys.exit(1)
+            click.echo(f"❌ Commit {commit_id[:8]} is already rejected", err=True)
+            sys.exit(EXIT_USER_ERROR)
         
         # Update database
         from zed.core.db import connect
@@ -486,8 +497,7 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
             click.echo(f"📝 Reason: {reason}")
         
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        handle_error(e, "reject")
 
 
 @cli.group()
@@ -529,23 +539,34 @@ def test(rule: str, context: str):
         click.echo(f"Context: {context}")
         
     except json.JSONDecodeError as e:
-        click.echo(f"Error: Invalid JSON - {e}", err=True)
-        sys.exit(1)
+        click.echo(f"❌ Error: Invalid JSON - {e}", err=True)
+        sys.exit(EXIT_USER_ERROR)
     except Exception as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        handle_error(e, "policy test")
 
 
 def _find_repository() -> Repository:
-    """Find the Shadow VCS repository in current or parent directories."""
+    """Find repository with helpful error context."""
     current = Path.cwd()
+    checked_paths = []
+    
     while current != current.parent:
+        checked_paths.append(current)
         repo = Repository(current)
         if repo.exists():
             return repo
         current = current.parent
     
-    raise ValueError("Not in a Shadow VCS repository")
+    # Provide helpful error with context
+    error_msg = "❌ Not in a Shadow VCS repository\n\n"
+    error_msg += "Searched in:\n"
+    for path in checked_paths[:3]:  # Show first 3 paths
+        error_msg += f"  {path}\n"
+    if len(checked_paths) > 3:
+        error_msg += f"  ... and {len(checked_paths) - 3} more\n"
+    error_msg += "\n💡 Run 'zed init' to create a repository"
+    
+    raise ValueError(error_msg)
 
 
 def _resolve_commit_id(repo: Repository, partial_id: str) -> str:

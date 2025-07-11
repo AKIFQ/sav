@@ -129,7 +129,7 @@ class TestCLISimple:
         with runner.isolated_filesystem():
             # Don't initialize - try status
             result = runner.invoke(cli, ["status"])
-            assert result.exit_code == 1
+            assert result.exit_code == 2  # User error - updated from 1 to 2
             assert "Not in a Shadow VCS repository" in result.output
 
     def test_double_init_fails(self):
@@ -143,5 +143,5 @@ class TestCLISimple:
             
             # Try to initialize again
             result = runner.invoke(cli, ["init"])
-            assert result.exit_code == 1
+            assert result.exit_code == 2  # User error - updated from 1 to 2
             assert "already exists" in result.output 
