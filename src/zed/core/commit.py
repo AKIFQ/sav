@@ -59,118 +59,183 @@ class Commit:
 class CommitManager:
     """Manages commit operations."""
 
+    # File size limit: 10MB
+    MAX_FILE_SIZE = 10 * 1024 * 1024
+
     def __init__(self, repo):
         """Initialize commit manager with repository."""
         self.repo = repo
 
+    def _atomic_write(self, target_path: Path, content: str):
+        """Write content atomically to prevent corruption."""
+        temp_path = target_path.with_suffix('.tmp')
+        try:
+            temp_path.write_text(content, encoding='utf-8')
+            if hasattr(os, 'fsync'):
+                with open(temp_path, 'r+b') as f:
+                    f.flush()
+                    os.fsync(f.fileno())  # Force write to disk
+            temp_path.replace(target_path)  # Atomic on Unix/Windows
+        except Exception:
+            temp_path.unlink(missing_ok=True)  # Cleanup on failure
+            raise
+
+    def _validate_file_path(self, file_path: Path) -> Path:
+        """Ensure file path is safe and within repository bounds."""
+        try:
+            resolved = file_path.resolve()
+            repo_root = self.repo.path.resolve()
+            
+            # Check if file is within repository
+            resolved.relative_to(repo_root)
+            
+            # Block path traversal attempts
+            if '..' in file_path.parts:
+                raise ValueError(f"Path traversal not allowed: {file_path}")
+                
+            return resolved
+        except ValueError as e:
+            raise ValueError(f"Invalid file path: {file_path}") from e
+
+    def _check_file_size(self, file_path: Path):
+        """Prevent commits of oversized files."""
+        if not file_path.exists():
+            return
+            
+        size = file_path.stat().st_size
+        if size > self.MAX_FILE_SIZE:
+            size_mb = size / (1024 * 1024)
+            limit_mb = self.MAX_FILE_SIZE / (1024 * 1024)
+            raise ValueError(
+                f"File too large: {file_path} ({size_mb:.1f}MB) "
+                f"exceeds limit ({limit_mb}MB). "
+                f"Use Git LFS for large files."
+            )
+
     def create_commit(
         self, message: str, author: str, files: list[Path]
     ) -> Commit:
-        """Create a new commit."""
-        # Validate files exist
+        """Create commit with full rollback on any failure."""
+        # Validate inputs first
         for file_path in files:
+            self._validate_file_path(file_path)
+            self._check_file_size(file_path)
             if not file_path.exists():
                 raise ValueError(f"File does not exist: {file_path}")
 
-        # Create commit
         commit = Commit.create(message, author, files)
+        commit_dir = self.repo.commits_dir / commit.id
+        
+        try:
+            with self.repo.get_lock():
+                # Create directory structure
+                commit_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Copy files to commit directory
+                files_dir = commit_dir / "files"
+                files_dir.mkdir(exist_ok=True)
+                
+                file_mappings = []
+                for file_path in files:
+                    relative_path = file_path.relative_to(self.repo.path) if file_path.is_relative_to(self.repo.path) else file_path.name
+                    dest_path = files_dir / relative_path
+                    dest_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(file_path, dest_path)
+                    file_mappings.append({
+                        "original": str(file_path),
+                        "relative": str(relative_path),
+                        "stored": str(dest_path.relative_to(commit_dir))
+                    })
 
-        # Acquire lock for commit operations
-        with self.repo.get_lock():
-            # Create commit directory
-            commit_dir = self.repo.commits_dir / commit.id
-            commit_dir.mkdir(parents=True, exist_ok=True)
+                # Generate diffs
+                diff_data = []
+                total_lines_added = 0
+                total_lines_deleted = 0
+                
+                for file_path in files:
+                    relative_path = file_path.relative_to(self.repo.path) if file_path.is_relative_to(self.repo.path) else file_path.name
+                    # For now, treat all files as new (no comparison with working tree)
+                    diff_info = generate_file_diff(None, file_path, self.repo.path)
+                    diff_data.append(diff_info)
+                    total_lines_added += diff_info["lines_added"]
+                    total_lines_deleted += diff_info["lines_deleted"]
 
-            # Copy files to commit directory
-            files_dir = commit_dir / "files"
-            files_dir.mkdir(exist_ok=True)
-            
-            file_mappings = []
-            for file_path in files:
-                relative_path = file_path.relative_to(self.repo.path) if file_path.is_relative_to(self.repo.path) else file_path.name
-                dest_path = files_dir / relative_path
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(file_path, dest_path)
-                file_mappings.append({
-                    "original": str(file_path),
-                    "relative": str(relative_path),
-                    "stored": str(dest_path.relative_to(commit_dir))
-                })
-
-            # Generate diffs
-            diff_data = []
-            total_lines_added = 0
-            total_lines_deleted = 0
-            
-            for file_path in files:
-                relative_path = file_path.relative_to(self.repo.path) if file_path.is_relative_to(self.repo.path) else file_path.name
-                # For now, treat all files as new (no comparison with working tree)
-                diff_info = generate_file_diff(None, file_path, self.repo.path)
-                diff_data.append(diff_info)
-                total_lines_added += diff_info["lines_added"]
-                total_lines_deleted += diff_info["lines_deleted"]
-
-            # Write diff.patch
-            diff_patch_path = commit_dir / "diff.patch"
-            with open(diff_patch_path, "w", encoding="utf-8") as f:
+                # Write diff.patch atomically
+                diff_patch_path = commit_dir / "diff.patch"
+                diff_content = ""
                 for diff_info in diff_data:
                     if diff_info["diff"]:
-                        f.write(diff_info["diff"])
-                        f.write("\n\n")
+                        diff_content += diff_info["diff"] + "\n\n"
+                self._atomic_write(diff_patch_path, diff_content)
 
-            # Write meta.json
-            meta_data = {
-                "id": commit.id,
-                "message": commit.message,
-                "author": commit.author,
-                "timestamp": commit.timestamp,
-                "status": commit.status,
-                "files": file_mappings,
-                "diff_stats": {
-                    "files_changed": len(files),
-                    "lines_added": total_lines_added,
-                    "lines_deleted": total_lines_deleted,
-                },
-            }
-            
-            meta_path = commit_dir / "meta.json"
-            with open(meta_path, "w", encoding="utf-8") as f:
-                json.dump(meta_data, f, indent=2)
+                # Write meta.json atomically
+                meta_data = {
+                    "id": commit.id,
+                    "message": commit.message,
+                    "author": commit.author,
+                    "timestamp": commit.timestamp,
+                    "status": commit.status,
+                    "files": file_mappings,
+                    "diff_stats": {
+                        "files_changed": len(files),
+                        "lines_added": total_lines_added,
+                        "lines_deleted": total_lines_deleted,
+                    },
+                }
+                
+                meta_path = commit_dir / "meta.json"
+                self._atomic_write(meta_path, json.dumps(meta_data, indent=2))
 
-            # Insert into database
-            with connect(self.repo.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO commits (id, message, author, timestamp, status, fingerprint_id)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        commit.id,
-                        commit.message,
-                        commit.author,
-                        commit.timestamp,
-                        commit.status,
-                        commit.fingerprint_id,
-                    ),
-                )
+                # Insert into database
+                with connect(self.repo.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        """
+                        INSERT INTO commits (id, message, author, timestamp, status, fingerprint_id)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            commit.id,
+                            commit.message,
+                            commit.author,
+                            commit.timestamp,
+                            commit.status,
+                            commit.fingerprint_id,
+                        ),
+                    )
+                    
+                    # Add to audit log
+                    cursor.execute(
+                        """
+                        INSERT INTO audit_log (timestamp, action, commit_id, user, details)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            int(time.time()),
+                            "commit_created",
+                            commit.id,
+                            commit.author,
+                            f"Created commit with {len(files)} files",
+                        ),
+                    )
+                    
+                    conn.commit()
+
+        except Exception as e:
+            # Rollback: clean up any partial state
+            if commit_dir.exists():
+                shutil.rmtree(commit_dir, ignore_errors=True)
                 
-                # Add to audit log
-                cursor.execute(
-                    """
-                    INSERT INTO audit_log (timestamp, action, commit_id, user, details)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        int(time.time()),
-                        "commit_created",
-                        commit.id,
-                        commit.author,
-                        f"Created commit with {len(files)} files",
-                    ),
-                )
+            # Clean up database entries
+            try:
+                with connect(self.repo.db_path) as conn:
+                    conn.execute("DELETE FROM commits WHERE id = ?", (commit.id,))
+                    conn.execute("DELETE FROM audit_log WHERE commit_id = ?", (commit.id,))
+                    conn.commit()
+            except Exception:
+                pass  # Database might not have entries yet
                 
-                conn.commit()
+            raise ValueError(f"Commit failed: {e}") from e
 
         return commit
 
