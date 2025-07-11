@@ -13,6 +13,8 @@ from zed.core.commit import CommitManager
 from zed.core.fingerprint import FingerprintGenerator
 from zed.core.policy import PolicyManager
 from zed.core.repo import Repository
+from zed.core.metrics import MetricsCollector
+from zed.core.config import get_config, reload_config, ConfigManager
 
 # Standardized exit codes
 EXIT_SUCCESS = 0
@@ -39,46 +41,63 @@ def handle_error(error: Exception, operation: str):
 
 def _auto_apply_if_safe(repo: Repository, commit, fingerprint, policy_result: dict) -> bool:
     """Auto-apply changes for very safe commits."""
+    from zed.core.config import get_config
+    
+    config = get_config(repo.path)
+    
+    # Check if auto-apply is enabled
+    if not config.security.auto_apply_enabled:
+        return False
+    
     if not policy_result.get("approved"):
         return False
     
-    # Only auto-apply for ultra-safe changes
-    if (fingerprint.risk_score < 0.1 and 
-        fingerprint.lines_added < 10 and
-        all(str(f).endswith('.md') for f in commit.files)):
-        
-        # Apply changes to working tree
-        applied_files = _apply_commit_to_working_tree(repo, commit)
-        
-        # Update status in database
-        from zed.core.db import connect
-        with connect(repo.db_path) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                "UPDATE commits SET status = ?, approved_at = ? WHERE id = ?",
-                ("applied", int(time.time()), commit.id)
-            )
-            
-            # Add to audit log
-            cursor.execute(
-                """
-                INSERT INTO audit_log (timestamp, action, commit_id, user, details)
-                VALUES (?, ?, ?, ?, ?)
-                """,
-                (
-                    int(time.time()),
-                    "commit_auto_applied",
-                    commit.id,
-                    "system",
-                    f"Auto-applied {len(applied_files)} safe files to working tree"
-                ),
-            )
-            
-            conn.commit()
-        
-        return True
+    # Check if commit meets auto-apply criteria
+    risk_threshold = config.security.auto_apply_risk_threshold
+    max_lines = config.security.auto_apply_max_lines
+    allowed_patterns = config.security.auto_apply_file_patterns
     
-    return False
+    # Check risk score and line count
+    if fingerprint.risk_score >= risk_threshold or fingerprint.lines_added > max_lines:
+        return False
+    
+    # Check if all files match allowed patterns
+    import fnmatch
+    for file_path in commit.files:
+        file_str = str(file_path)
+        if not any(fnmatch.fnmatch(file_str, pattern) for pattern in allowed_patterns):
+            return False
+    
+    # Apply changes to working tree
+    applied_files = _apply_commit_to_working_tree(repo, commit)
+    
+    # Update status in database
+    from zed.core.db import connect
+    with connect(repo.db_path, repo.path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE commits SET status = ?, approved_at = ? WHERE id = ?",
+            ("applied", int(time.time()), commit.id)
+        )
+        
+        # Add to audit log
+        cursor.execute(
+            """
+            INSERT INTO audit_log (timestamp, action, commit_id, user, details)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                int(time.time()),
+                "commit_auto_applied",
+                commit.id,
+                "system",
+                f"Auto-applied {len(applied_files)} safe files to working tree"
+            ),
+        )
+        
+        conn.commit()
+    
+    return True
 
 
 def _apply_commit_to_working_tree(repo: Repository, commit) -> list[Path]:
@@ -101,13 +120,17 @@ def _apply_commit_to_working_tree(repo: Repository, commit) -> list[Path]:
 def _run_test_command(test_cmd: str) -> bool:
     """Run test command and return success status."""
     import subprocess
+    from zed.core.config import get_config
+    
+    config = get_config()
+    timeout = config.performance.test_timeout_seconds
     
     try:
-        # Run test command with timeout
+        # Run test command with configurable timeout
         result = subprocess.run(
             test_cmd,
             shell=True,
-            timeout=300,  # 5 minute timeout
+            timeout=timeout,
             capture_output=True,
             text=True
         )
@@ -126,7 +149,7 @@ def _run_test_command(test_cmd: str) -> bool:
             return False
             
     except subprocess.TimeoutExpired:
-        click.echo("❌ Test command timed out (5 minutes)")
+        click.echo(f"❌ Test command timed out ({timeout} seconds)")
         return False
     except Exception as e:
         click.echo(f"❌ Test command failed: {e}")
@@ -253,10 +276,13 @@ def commit(message: str, author: str, test_cmd: Optional[str], files: tuple[Path
                 click.echo("❌ Tests failed, aborting commit", err=True)
                 sys.exit(EXIT_USER_ERROR)
         
-        # Create commit
+        # Create commit with metrics tracking
         commit_mgr = CommitManager(repo)
+        metrics = MetricsCollector(repo)
+        
         try:
-            commit = commit_mgr.create_commit(message, author, file_list)
+            with metrics.measure_operation("commit_create", {"files": len(file_list), "author": author}):
+                commit = commit_mgr.create_commit(message, author, file_list)
         except ValueError as e:
             if "File does not exist" in str(e):
                 click.echo(f"❌ {e}", err=True)
@@ -280,9 +306,10 @@ def commit(message: str, author: str, test_cmd: Optional[str], files: tuple[Path
             meta_data = json.load(f)
         diff_stats = meta_data["diff_stats"]
         
-        # Generate fingerprint
+        # Generate fingerprint with metrics
         fingerprint_gen = FingerprintGenerator(repo)
-        fingerprint = fingerprint_gen.generate(commit, diff_stats)
+        with metrics.measure_operation("fingerprint_generate", {"files": len(file_list)}):
+            fingerprint = fingerprint_gen.generate(commit, diff_stats)
         
         # Adjust risk score based on test results
         if test_cmd and test_passed:
@@ -319,7 +346,7 @@ def commit(message: str, author: str, test_cmd: Optional[str], files: tuple[Path
             else:
                 # Update commit status to approved (but not applied)
                 from zed.core.db import connect
-                with connect(repo.db_path) as conn:
+                with connect(repo.db_path, repo.path) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "UPDATE commits SET status = ? WHERE id = ?",
@@ -367,7 +394,7 @@ def status(all: bool):
         repo = _find_repository()
         
         from zed.core.db import connect
-        with connect(repo.db_path) as conn:
+        with connect(repo.db_path, repo.path) as conn:
             cursor = conn.cursor()
             
             if all:
@@ -528,7 +555,7 @@ def approve(commit_id: str, user: str):
         
         # Update database
         from zed.core.db import connect
-        with connect(repo.db_path) as conn:
+        with connect(repo.db_path, repo.path) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE commits SET status = ?, approved_by = ?, approved_at = ? WHERE id = ?",
@@ -604,7 +631,7 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
         
         # Update database
         from zed.core.db import connect
-        with connect(repo.db_path) as conn:
+        with connect(repo.db_path, repo.path) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE commits SET status = ? WHERE id = ?",
@@ -643,6 +670,18 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
 @cli.group()
 def policy():
     """Policy management commands."""
+    pass
+
+
+@cli.group()
+def metrics():
+    """Metrics and monitoring commands."""
+    pass
+
+
+@cli.group()
+def config():
+    """Configuration management commands."""
     pass
 
 
@@ -721,6 +760,227 @@ def validate():
         handle_error(e, "policy validate")
 
 
+@metrics.command()
+def stats():
+    """Show usage statistics."""
+    try:
+        repo = _find_repository()
+        collector = MetricsCollector(repo)
+        stats = collector.get_usage_stats()
+        
+        click.echo("📊 Usage Statistics")
+        click.echo("=" * 50)
+        click.echo(f"Total commits: {stats.total_commits}")
+        click.echo(f"  🚀 Auto-approved: {stats.auto_approved_commits}")
+        click.echo(f"  ✅ Manual approved: {stats.manual_approved_commits}")
+        click.echo(f"  ❌ Rejected: {stats.rejected_commits}")
+        click.echo()
+        click.echo(f"Average risk score: {stats.avg_risk_score}")
+        click.echo(f"Total files committed: {stats.total_files_committed}")
+        click.echo(f"Total lines added: {stats.total_lines_added}")
+        click.echo(f"Total lines deleted: {stats.total_lines_deleted}")
+        click.echo(f"Average commit size: {stats.avg_commit_size} files")
+        
+    except Exception as e:
+        handle_error(e, "metrics stats")
+
+
+@metrics.command()
+def performance():
+    """Show performance metrics."""
+    try:
+        repo = _find_repository()
+        collector = MetricsCollector(repo)
+        perf = collector.get_performance_summary()
+        
+        if not perf:
+            click.echo("📈 No performance data available yet")
+            return
+        
+        click.echo("📈 Performance Summary")
+        click.echo("=" * 50)
+        
+        for operation, stats in perf.items():
+            click.echo(f"\n{operation}:")
+            click.echo(f"  Count: {stats['count']}")
+            click.echo(f"  Average: {stats['avg_ms']:.1f}ms")
+            click.echo(f"  Min/Max: {stats['min_ms']:.1f}ms / {stats['max_ms']:.1f}ms")
+            click.echo(f"  P50/P95: {stats['p50_ms']:.1f}ms / {stats['p95_ms']:.1f}ms")
+        
+    except Exception as e:
+        handle_error(e, "metrics performance")
+
+
+@metrics.command()
+def health():
+    """Check system health."""
+    try:
+        repo = _find_repository()
+        collector = MetricsCollector(repo)
+        health = collector.health_check()
+        
+        status_icons = {
+            'healthy': '✅',
+            'warning': '⚠️',
+            'degraded': '❌'
+        }
+        
+        status_colors = {
+            'healthy': 'green',
+            'warning': 'yellow',
+            'degraded': 'red'
+        }
+        
+        icon = status_icons.get(health['status'], '❓')
+        color = status_colors.get(health['status'], 'white')
+        
+        click.echo(f"{icon} System Health: {click.style(health['status'].upper(), fg=color)}")
+        
+        if health['issues']:
+            click.echo("\nIssues:")
+            for issue in health['issues']:
+                click.echo(f"  • {issue}")
+        else:
+            click.echo("  All checks passed!")
+        
+        click.echo(f"\nLast checked: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(health['timestamp']))}")
+        
+    except Exception as e:
+        handle_error(e, "metrics health")
+
+
+@metrics.command()
+@click.option(
+    "--days",
+    "-d",
+    default=90,
+    help="Number of days of data to keep (default: 90)",
+)
+@click.confirmation_option(prompt="Are you sure you want to delete old data?")
+def cleanup(days: int):
+    """Clean up old metrics and audit data."""
+    try:
+        repo = _find_repository()
+        collector = MetricsCollector(repo)
+        result = collector.cleanup_old_data(days)
+        
+        click.echo(f"🧹 Cleanup completed:")
+        click.echo(f"  Deleted {result['deleted_audit_logs']} old audit log entries")
+        click.echo(f"  Deleted {result['deleted_metrics']} old metrics")
+        click.echo(f"  Kept data from last {days} days")
+        
+    except Exception as e:
+        handle_error(e, "metrics cleanup")
+
+
+@config.command()
+def show():
+    """Show current configuration."""
+    try:
+        repo = None
+        try:
+            repo = _find_repository()
+        except ValueError:
+            pass  # No repository found, use global config
+        
+        cfg = get_config(repo.path if repo else None)
+        
+        click.echo("🔧 Shadow VCS Configuration")
+        click.echo("=" * 50)
+        
+        # Show config file path if available
+        if cfg.config_file_path:
+            click.echo(f"Config file: {cfg.config_file_path}")
+        else:
+            click.echo("Config file: Using defaults")
+        
+        click.echo(f"Log level: {cfg.log_level}")
+        click.echo(f"Debug mode: {cfg.debug_mode}")
+        click.echo()
+        
+        click.echo("Database:")
+        click.echo(f"  Timeout: {cfg.database.timeout_seconds}s")
+        click.echo(f"  Cache size: {cfg.database.cache_size_mb}MB")
+        click.echo(f"  WAL mode: {cfg.database.wal_mode}")
+        click.echo()
+        
+        click.echo("Security:")
+        click.echo(f"  Max file size: {cfg.security.max_file_size_mb}MB")
+        click.echo(f"  Auto-apply enabled: {cfg.security.auto_apply_enabled}")
+        click.echo(f"  Auto-apply risk threshold: {cfg.security.auto_apply_risk_threshold}")
+        click.echo(f"  Auto-apply max lines: {cfg.security.auto_apply_max_lines}")
+        click.echo()
+        
+        click.echo("Performance:")
+        click.echo(f"  Fingerprint cache size: {cfg.performance.fingerprint_cache_size}")
+        click.echo(f"  Test timeout: {cfg.performance.test_timeout_seconds}s")
+        click.echo(f"  Metrics retention: {cfg.performance.metrics_retention_days} days")
+        click.echo()
+        
+        click.echo("Monitoring:")
+        click.echo(f"  Health checks: {cfg.monitoring.health_check_enabled}")
+        click.echo(f"  Metrics collection: {cfg.monitoring.metrics_collection_enabled}")
+        click.echo(f"  Disk space warning: {cfg.monitoring.disk_space_warning_mb}MB")
+        
+    except Exception as e:
+        handle_error(e, "config show")
+
+
+@config.command()
+@click.argument("output_path", type=click.Path(path_type=Path))
+def sample(output_path: Path):
+    """Generate a sample configuration file."""
+    try:
+        config_manager = ConfigManager()
+        config_manager.save_sample_config(output_path)
+        
+        click.echo(f"✅ Sample configuration saved to {output_path}")
+        click.echo()
+        click.echo("Edit the file and place it in one of these locations:")
+        click.echo("  ~/.zed/config.yaml")
+        click.echo("  ~/.config/zed/config.yaml")
+        click.echo("  /etc/zed/config.yaml")
+        click.echo()
+        click.echo("Or set ZED_CONFIG_PATH environment variable to specify a custom location.")
+        
+    except Exception as e:
+        handle_error(e, "config sample")
+
+
+@config.command()
+def env():
+    """Show environment variable help."""
+    try:
+        config_manager = ConfigManager()
+        help_text = config_manager.get_env_help()
+        click.echo(help_text)
+        
+    except Exception as e:
+        handle_error(e, "config env")
+
+
+@config.command()
+def reload():
+    """Reload configuration from all sources."""
+    try:
+        repo = None
+        try:
+            repo = _find_repository()
+        except ValueError:
+            pass  # No repository found, use global config
+        
+        cfg = reload_config(repo.path if repo else None)
+        click.echo("✅ Configuration reloaded")
+        
+        if cfg.config_file_path:
+            click.echo(f"Loaded from: {cfg.config_file_path}")
+        else:
+            click.echo("Using default configuration")
+        
+    except Exception as e:
+        handle_error(e, "config reload")
+
+
 def _find_repository() -> Repository:
     """Find repository with helpful error context."""
     current = Path.cwd()
@@ -749,7 +1009,7 @@ def _resolve_commit_id(repo: Repository, partial_id: str) -> str:
     """Resolve a partial commit ID to full ID."""
     from zed.core.db import connect
     
-    with connect(repo.db_path) as conn:
+    with connect(repo.db_path, repo.path) as conn:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id FROM commits WHERE id LIKE ? || '%'",

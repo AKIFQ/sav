@@ -59,12 +59,13 @@ class Commit:
 class CommitManager:
     """Manages commit operations."""
 
-    # File size limit: 10MB
-    MAX_FILE_SIZE = 10 * 1024 * 1024
-
     def __init__(self, repo):
         """Initialize commit manager with repository."""
         self.repo = repo
+        
+        # Import here to avoid circular imports
+        from zed.core.config import get_config
+        self.config = get_config(repo.path)
 
     def _atomic_write(self, target_path: Path, content: str):
         """Write content atomically to prevent corruption."""
@@ -103,9 +104,11 @@ class CommitManager:
             return
             
         size = file_path.stat().st_size
-        if size > self.MAX_FILE_SIZE:
+        max_size_bytes = self.config.security.max_file_size_mb * 1024 * 1024
+        
+        if size > max_size_bytes:
             size_mb = size / (1024 * 1024)
-            limit_mb = self.MAX_FILE_SIZE / (1024 * 1024)
+            limit_mb = self.config.security.max_file_size_mb
             raise ValueError(
                 f"File too large: {file_path} ({size_mb:.1f}MB) "
                 f"exceeds limit ({limit_mb}MB). "
@@ -187,7 +190,7 @@ class CommitManager:
                 self._atomic_write(meta_path, json.dumps(meta_data, indent=2))
 
                 # Insert into database
-                with connect(self.repo.db_path) as conn:
+                with connect(self.repo.db_path, self.repo.path) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         """
@@ -228,7 +231,7 @@ class CommitManager:
                 
             # Clean up database entries
             try:
-                with connect(self.repo.db_path) as conn:
+                with connect(self.repo.db_path, self.repo.path) as conn:
                     conn.execute("DELETE FROM commits WHERE id = ?", (commit.id,))
                     conn.execute("DELETE FROM audit_log WHERE commit_id = ?", (commit.id,))
                     conn.commit()
@@ -241,7 +244,7 @@ class CommitManager:
 
     def get_commit(self, commit_id: str) -> Optional[Commit]:
         """Retrieve a commit by ID."""
-        with connect(self.repo.db_path) as conn:
+        with connect(self.repo.db_path, self.repo.path) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "SELECT * FROM commits WHERE id = ?",

@@ -4,20 +4,41 @@ import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Optional
 
 # Schema version
 SCHEMA_VERSION = 2
 
 
 @contextmanager
-def connect(db_path: Path) -> Generator[sqlite3.Connection, None, None]:
-    """Connect to the SQLite database with proper settings."""
-    conn = sqlite3.connect(db_path, timeout=30)
+def connect(db_path: Path, repo_path: Optional[Path] = None) -> Generator[sqlite3.Connection, None, None]:
+    """Connect to the SQLite database with configurable optimizations."""
+    # Import here to avoid circular imports
+    from zed.core.config import get_config
+    
+    # Try to determine repo path from db_path if not provided
+    if repo_path is None and db_path.name == "index.sqlite":
+        repo_path = db_path.parent.parent  # Go from .zed/index.sqlite to repo root
+    
+    config = get_config(repo_path)
+    timeout = config.database.timeout_seconds
+    cache_size_pages = config.database.cache_size_mb * 256  # Convert MB to pages
+    
+    conn = sqlite3.connect(db_path, timeout=timeout)
     conn.row_factory = sqlite3.Row
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
+        # Performance optimizations based on configuration
+        if config.database.wal_mode:
+            conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA synchronous=NORMAL")  # Faster than FULL, still safe with WAL
+        conn.execute(f"PRAGMA cache_size={cache_size_pages}")
+        conn.execute("PRAGMA temp_store=MEMORY")    # Store temp tables in memory
+        conn.execute("PRAGMA mmap_size=268435456")  # 256MB memory-mapped I/O
+        
+        if config.database.optimize_on_connect:
+            conn.execute("PRAGMA optimize")         # Auto-optimize on connect
+        
         yield conn
     finally:
         conn.close()
@@ -95,9 +116,17 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
     cursor.execute("DROP TABLE commits")
     cursor.execute("ALTER TABLE commits_new RENAME TO commits")
     
-    # Recreate indexes
+    # Recreate indexes with performance improvements
     cursor.execute("CREATE INDEX idx_commits_status ON commits(status)")
     cursor.execute("CREATE INDEX idx_commits_timestamp ON commits(timestamp)")
+    cursor.execute("CREATE INDEX idx_commits_author ON commits(author)")
+    cursor.execute("CREATE INDEX idx_commits_status_timestamp ON commits(status, timestamp)")
+    
+    # Add missing indexes for other tables if they don't exist
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_action ON audit_log(action)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_risk_score ON fingerprints(risk_score)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_fingerprints_security_sensitive ON fingerprints(security_sensitive)")
     
     # Update schema version
     cursor.execute("UPDATE schema_version SET version = 2")
@@ -156,11 +185,36 @@ def _create_schema_v1(conn: sqlite3.Connection) -> None:
         -- Indexes for performance
         CREATE INDEX idx_commits_status ON commits(status);
         CREATE INDEX idx_commits_timestamp ON commits(timestamp);
+        CREATE INDEX idx_commits_author ON commits(author);
+        CREATE INDEX idx_commits_status_timestamp ON commits(status, timestamp);
         CREATE INDEX idx_audit_log_timestamp ON audit_log(timestamp);
+        CREATE INDEX idx_audit_log_action ON audit_log(action);
+        CREATE INDEX idx_audit_log_user ON audit_log(user);
         CREATE INDEX idx_fingerprints_commit_id ON fingerprints(commit_id);
+        CREATE INDEX idx_fingerprints_risk_score ON fingerprints(risk_score);
+        CREATE INDEX idx_fingerprints_security_sensitive ON fingerprints(security_sensitive);
         """
     )
     conn.commit()
+
+
+def execute_bulk_operation(db_path: Path, operation_func):
+    """Execute bulk database operations with optimized settings."""
+    with connect(db_path) as conn:
+        # Temporarily optimize for bulk operations
+        conn.execute("PRAGMA synchronous=OFF")  # Fastest, but less safe
+        conn.execute("BEGIN TRANSACTION")
+        
+        try:
+            result = operation_func(conn)
+            conn.execute("COMMIT")
+            return result
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            # Restore safe settings
+            conn.execute("PRAGMA synchronous=NORMAL")
 
 
 def init_database(db_path: Path) -> None:

@@ -5,6 +5,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Optional
+from functools import lru_cache
 
 from zed.core.db import connect
 from zed.utils.diff import is_binary_file
@@ -82,9 +83,10 @@ class FingerprintGenerator:
         # Check for security-sensitive files
         security_sensitive = self._check_security_sensitive(commit.files)
         
-        # Check for large binary files (>500KB)
+        # Check for large binary files (threshold: 500KB)
+        binary_threshold = 500 * 1024  # Could be configurable
         for file_path in commit.files:
-            if file_path.exists() and file_path.stat().st_size > 500 * 1024:
+            if file_path.exists() and file_path.stat().st_size > binary_threshold:
                 security_sensitive = True
                 break
         
@@ -120,7 +122,7 @@ class FingerprintGenerator:
             json.dump(fingerprint.to_dict(), f, indent=2)
         
         # Save to database
-        with connect(self.repo.db_path) as conn:
+        with connect(self.repo.db_path, self.repo.path) as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
@@ -214,12 +216,22 @@ class FingerprintGenerator:
         
         return round(risk, 2)
 
+    @lru_cache(maxsize=128)  # Configurable cache size
     def get_fingerprint(self, fingerprint_id: str) -> Optional[Fingerprint]:
-        """Retrieve a fingerprint by ID."""
+        """Retrieve a fingerprint by ID with caching."""
         fingerprint_path = self.repo.fingerprints_dir / f"{fingerprint_id}.json"
         if not fingerprint_path.exists():
             return None
         
+        # Check file modification time for cache invalidation
+        mtime = fingerprint_path.stat().st_mtime
+        cache_key = f"{fingerprint_id}:{mtime}"
+        
+        return self._load_fingerprint_data(cache_key, fingerprint_path)
+    
+    @lru_cache(maxsize=128)
+    def _load_fingerprint_data(self, cache_key: str, fingerprint_path: Path) -> Fingerprint:
+        """Load fingerprint data with caching based on file modification time."""
         with open(fingerprint_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         

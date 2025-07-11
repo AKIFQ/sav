@@ -49,10 +49,16 @@ class TestDatabase:
             )
             indexes = [row["name"] for row in cursor.fetchall()]
             expected_indexes = [
+                "idx_audit_log_action",
                 "idx_audit_log_timestamp",
+                "idx_audit_log_user",
+                "idx_commits_author",
                 "idx_commits_status",
+                "idx_commits_status_timestamp",
                 "idx_commits_timestamp",
                 "idx_fingerprints_commit_id",
+                "idx_fingerprints_risk_score",
+                "idx_fingerprints_security_sensitive",
             ]
             assert sorted(indexes) == sorted(expected_indexes)
 
