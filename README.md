@@ -263,4 +263,8 @@ MIT License - see [LICENSE](LICENSE)
 
 ---
 
+<<<<<<< HEAD
 **If you like this project, please ⭐️ the repo and share your feedback!** 
+=======
+**Shadow VCS** - Because AI agents need training wheels too! 🚀 
+>>>>>>> 04bbb81c76b4de63e70fdf4c16021eded33f14e7
