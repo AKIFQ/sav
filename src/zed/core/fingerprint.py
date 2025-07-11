@@ -1,5 +1,6 @@
 """Fingerprint generation and risk assessment for Shadow VCS."""
 import json
+import re
 import time
 import uuid
 from pathlib import Path
@@ -53,19 +54,16 @@ class Fingerprint:
 class FingerprintGenerator:
     """Generates fingerprints for commits."""
 
-    # Security-sensitive file patterns
+    # Security-sensitive file patterns (regex)
     SECURITY_PATTERNS = [
-        ".env",
-        "config",
-        "secret",
-        "password",
-        "key",
-        "token",
-        "auth",
-        "credential",
-        ".pem",
-        ".key",
-        ".cert",
+        r'\.env($|\.|_)',                    # .env, .env.local, .env_prod
+        r'(^|/)\.?env\.',                    # env.json, .env.yaml
+        r'(password|secret|key|token)s?\.',  # passwords.txt, secret.json
+        r'\.(pem|key|crt|p12|pfx|jks)$',    # Certificate files
+        r'(auth|oauth|jwt).*config',         # auth_config.py, oauth_config.json
+        r'config.*(secret|password|key)',    # config_secrets.yml
+        r'credentials?\.json$',              # credentials.json
+        r'(aws|gcp|azure).*(credential|key|secret)',  # Cloud credentials
     ]
 
     def __init__(self, repo):
@@ -155,12 +153,17 @@ class FingerprintGenerator:
         return fingerprint
 
     def _check_security_sensitive(self, files: list[Path]) -> bool:
-        """Check if any files are security-sensitive."""
+        """Check files against security patterns using regex."""
+        compiled_patterns = [re.compile(pattern, re.IGNORECASE) for pattern in self.SECURITY_PATTERNS]
+        
         for file_path in files:
-            file_str = str(file_path).lower()
-            for pattern in self.SECURITY_PATTERNS:
-                if pattern in file_str:
+            file_str = str(file_path)
+            
+            # Check against each pattern
+            for pattern in compiled_patterns:
+                if pattern.search(file_str):
                     return True
+        
         return False
 
     def _calculate_risk_score(

@@ -16,6 +16,7 @@ class Repository:
         self.fingerprints_dir = self.zed_dir / "fingerprints"
         self.db_path = self.zed_dir / "index.sqlite"
         self.lock_path = self.zed_dir / ".lock"
+        self.constraints_path = self.zed_dir / "constraints.yaml"
 
     def init(self):
         """Initialize a new Shadow VCS repository."""
@@ -32,8 +33,7 @@ class Repository:
         init_database(self.db_path)
 
         # Create constraints file with default conservative rules
-        constraints_path = self.zed_dir / "constraints.yaml"
-        constraints_path.write_text(
+        self.constraints_path.write_text(
             """# Shadow VCS Policy Rules
 # Format: match (glob), auto_approve (bool), require_role (string) or condition (Python expression)
 
@@ -61,6 +61,45 @@ rules:
     def exists(self) -> bool:
         """Check if this is a valid Shadow VCS repository."""
         return self.zed_dir.exists() and self.db_path.exists()
+
+    def validate(self) -> list[str]:
+        """Validate repository structure and return list of issues."""
+        issues = []
+        
+        if not self.zed_dir.exists():
+            issues.append(".zed directory missing")
+            return issues
+        
+        if not self.commits_dir.exists():
+            issues.append("commits directory missing")
+        
+        if not self.fingerprints_dir.exists():
+            issues.append("fingerprints directory missing")
+        
+        if not self.db_path.exists():
+            issues.append("database file missing")
+        
+        if not self.constraints_path.exists():
+            issues.append("constraints.yaml missing")
+        
+        # Validate database integrity
+        try:
+            from zed.core.db import verify_database_integrity
+            if not verify_database_integrity(self.db_path):
+                issues.append("database integrity check failed")
+        except Exception as e:
+            issues.append(f"database validation error: {e}")
+        
+        # Validate constraints file
+        try:
+            from zed.core.policy import PolicyManager
+            policy_mgr = PolicyManager(self)
+            if not policy_mgr.rules:
+                issues.append("no valid policy rules found")
+        except Exception as e:
+            issues.append(f"policy validation error: {e}")
+        
+        return issues
 
     def get_lock(self) -> FileLock:
         """Get a file lock for repository operations."""

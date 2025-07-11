@@ -1,4 +1,6 @@
 """Database management for Shadow VCS."""
+import logging
+import shutil
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,6 +21,31 @@ def connect(db_path: Path) -> Generator[sqlite3.Connection, None, None]:
         yield conn
     finally:
         conn.close()
+
+
+def verify_database_integrity(db_path: Path) -> bool:
+    """Check database integrity and attempt recovery."""
+    try:
+        with connect(db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Quick integrity check
+            result = cursor.execute("PRAGMA integrity_check").fetchone()
+            if result[0] != "ok":
+                logging.error(f"Database integrity check failed: {result[0]}")
+                return False
+            
+            # Check foreign key constraints
+            cursor.execute("PRAGMA foreign_key_check")
+            violations = cursor.fetchall()
+            if violations:
+                logging.error(f"Foreign key violations: {violations}")
+                return False
+                
+            return True
+    except Exception as e:
+        logging.error(f"Database verification failed: {e}")
+        return False
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -99,6 +126,40 @@ def _create_schema_v1(conn: sqlite3.Connection) -> None:
 
 
 def init_database(db_path: Path) -> None:
-    """Initialize database with schema."""
-    with connect(db_path) as conn:
-        migrate(conn) 
+    """Initialize database with integrity verification."""
+    # Create backup if database exists
+    if db_path.exists():
+        backup_path = db_path.with_suffix('.backup')
+        try:
+            shutil.copy2(db_path, backup_path)
+            logging.info(f"Created database backup: {backup_path}")
+        except Exception as e:
+            logging.warning(f"Failed to create backup: {e}")
+    
+    try:
+        with connect(db_path) as conn:
+            migrate(conn)
+            
+        # Verify the newly created/migrated database
+        if not verify_database_integrity(db_path):
+            raise ValueError("Database failed integrity check after creation")
+            
+    except Exception as e:
+        # Restore backup if available
+        backup_path = db_path.with_suffix('.backup')
+        if backup_path.exists() and db_path.exists():
+            try:
+                shutil.copy2(backup_path, db_path)
+                logging.info("Restored database from backup")
+                
+                # Verify restored database
+                if verify_database_integrity(db_path):
+                    logging.info("Backup database verification successful")
+                else:
+                    raise ValueError("Backup database also corrupted")
+                    
+            except Exception as restore_error:
+                logging.error(f"Failed to restore backup: {restore_error}")
+                raise ValueError(f"Database initialization failed and backup restore failed: {e}") from e
+        else:
+            raise ValueError(f"Database initialization failed: {e}") from e 
