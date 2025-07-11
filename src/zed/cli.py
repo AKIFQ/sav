@@ -1,4 +1,5 @@
 """Command-line interface for Shadow VCS."""
+import json
 import os
 import shutil
 import sys
@@ -34,6 +35,102 @@ def handle_error(error: Exception, operation: str):
     else:
         click.echo(f"❌ Unexpected error during {operation}: {error}", err=True)
         sys.exit(EXIT_ERROR)
+
+
+def _auto_apply_if_safe(repo: Repository, commit, fingerprint, policy_result: dict) -> bool:
+    """Auto-apply changes for very safe commits."""
+    if not policy_result.get("approved"):
+        return False
+    
+    # Only auto-apply for ultra-safe changes
+    if (fingerprint.risk_score < 0.1 and 
+        fingerprint.lines_added < 10 and
+        all(str(f).endswith('.md') for f in commit.files)):
+        
+        # Apply changes to working tree
+        applied_files = _apply_commit_to_working_tree(repo, commit)
+        
+        # Update status in database
+        from zed.core.db import connect
+        with connect(repo.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "UPDATE commits SET status = ?, approved_at = ? WHERE id = ?",
+                ("applied", int(time.time()), commit.id)
+            )
+            
+            # Add to audit log
+            cursor.execute(
+                """
+                INSERT INTO audit_log (timestamp, action, commit_id, user, details)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    int(time.time()),
+                    "commit_auto_applied",
+                    commit.id,
+                    "system",
+                    f"Auto-applied {len(applied_files)} safe files to working tree"
+                ),
+            )
+            
+            conn.commit()
+        
+        return True
+    
+    return False
+
+
+def _apply_commit_to_working_tree(repo: Repository, commit) -> list[Path]:
+    """Copy committed files to working directory."""
+    commit_dir = repo.commits_dir / commit.id
+    files_dir = commit_dir / "files"
+    
+    applied_files = []
+    for stored_file in files_dir.rglob("*"):
+        if stored_file.is_file():
+            rel_path = stored_file.relative_to(files_dir)
+            dest_path = repo.path / rel_path
+            dest_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(stored_file, dest_path)
+            applied_files.append(rel_path)
+    
+    return applied_files
+
+
+def _run_test_command(test_cmd: str) -> bool:
+    """Run test command and return success status."""
+    import subprocess
+    
+    try:
+        # Run test command with timeout
+        result = subprocess.run(
+            test_cmd,
+            shell=True,
+            timeout=300,  # 5 minute timeout
+            capture_output=True,
+            text=True
+        )
+        
+        if result.returncode == 0:
+            click.echo("✅ Tests passed")
+            return True
+        else:
+            click.echo(f"❌ Tests failed (exit code {result.returncode})")
+            if result.stdout:
+                click.echo("STDOUT:")
+                click.echo(result.stdout[-500:])  # Last 500 chars
+            if result.stderr:
+                click.echo("STDERR:")
+                click.echo(result.stderr[-500:])  # Last 500 chars
+            return False
+            
+    except subprocess.TimeoutExpired:
+        click.echo("❌ Test command timed out (5 minutes)")
+        return False
+    except Exception as e:
+        click.echo(f"❌ Test command failed: {e}")
+        return False
 
 
 @click.group()
@@ -119,13 +216,18 @@ def init(path: Path):
     default=lambda: os.environ.get("USER", "unknown"),
     help="Author name (defaults to $USER)",
 )
+@click.option(
+    "--test-cmd",
+    "-t",
+    help="Run test command before commit (e.g., 'pytest', 'npm test')",
+)
 @click.argument(
     "files",
     nargs=-1,
     required=True,
     type=click.Path(exists=True, path_type=Path),
 )
-def commit(message: str, author: str, files: tuple[Path, ...]):
+def commit(message: str, author: str, test_cmd: Optional[str], files: tuple[Path, ...]):
     """Create a new commit with specified files.
     
     \b
@@ -133,6 +235,7 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
       zed commit -m "Add feature" src/feature.py
       zed commit -m "Update docs" README.md docs/
       zed commit -m "AI: Refactored auth" -a "gpt-4" auth.py
+      zed commit -m "Fix bug" -t "pytest tests/" src/fix.py
     """
     try:
         # Find repository
@@ -141,14 +244,38 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
         # Convert files to list
         file_list = list(files)
         
+        # Run tests if test command provided
+        test_passed = True
+        if test_cmd:
+            click.echo(f"🧪 Running tests: {test_cmd}")
+            test_passed = _run_test_command(test_cmd)
+            if not test_passed:
+                click.echo("❌ Tests failed, aborting commit", err=True)
+                sys.exit(EXIT_USER_ERROR)
+        
         # Create commit
         commit_mgr = CommitManager(repo)
-        commit = commit_mgr.create_commit(message, author, file_list)
+        try:
+            commit = commit_mgr.create_commit(message, author, file_list)
+        except ValueError as e:
+            if "File does not exist" in str(e):
+                click.echo(f"❌ {e}", err=True)
+                click.echo("💡 Check file paths and try again", err=True)
+                sys.exit(EXIT_USER_ERROR)
+            elif "File too large" in str(e):
+                click.echo(f"❌ {e}", err=True)
+                click.echo("💡 Consider using Git LFS for large files", err=True)
+                sys.exit(EXIT_USER_ERROR)
+            elif "Path traversal" in str(e):
+                click.echo(f"❌ {e}", err=True)
+                click.echo("💡 Paths must be within the repository", err=True)
+                sys.exit(EXIT_USER_ERROR)
+            else:
+                raise
         
         # Get diff stats from meta.json
         commit_dir = repo.commits_dir / commit.id
         meta_path = commit_dir / "meta.json"
-        import json
         with open(meta_path, "r") as f:
             meta_data = json.load(f)
         diff_stats = meta_data["diff_stats"]
@@ -157,10 +284,16 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
         fingerprint_gen = FingerprintGenerator(repo)
         fingerprint = fingerprint_gen.generate(commit, diff_stats)
         
+        # Adjust risk score based on test results
+        if test_cmd and test_passed:
+            # Reduce risk slightly for tested changes
+            fingerprint.risk_score = max(0.0, fingerprint.risk_score - 0.1)
+        
         # Evaluate policy constraints
         policy_mgr = PolicyManager(repo)
         policy_result = policy_mgr.evaluate(fingerprint, file_list)
         
+        # Determine initial status
         if policy_result["approved"]:
             status = "approved"
             status_msg = "auto-approved by policy"
@@ -174,26 +307,41 @@ def commit(message: str, author: str, files: tuple[Path, ...]):
             status_msg = "requires review"
             status_icon = "⏳"
         
-        # Update commit status if auto-approved
+        # Try auto-apply for ultra-safe changes
+        auto_applied = False
         if status == "approved":
-            from zed.core.db import connect
-            with connect(repo.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "UPDATE commits SET status = ? WHERE id = ?",
-                    (status, commit.id),
-                )
-                conn.commit()
+            auto_applied = _auto_apply_if_safe(repo, commit, fingerprint, policy_result)
+            
+            if auto_applied:
+                status = "applied"
+                status_msg = "auto-approved and applied"
+                status_icon = "🚀"
+            else:
+                # Update commit status to approved (but not applied)
+                from zed.core.db import connect
+                with connect(repo.db_path) as conn:
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "UPDATE commits SET status = ? WHERE id = ?",
+                        (status, commit.id),
+                    )
+                    conn.commit()
         
         click.echo(f"{status_icon} Created commit {click.style(commit.id[:8], fg='cyan')} ({status_msg})")
         click.echo(f"  📁 Files: {len(file_list)}")
         click.echo(f"  📊 Lines: +{fingerprint.lines_added} -{fingerprint.lines_deleted}")
         click.echo(f"  ⚡ Risk score: {fingerprint.risk_score}")
         
-        if status == "waiting_review":
+        if auto_applied:
+            click.echo(f"  🚀 Changes automatically applied to working directory!")
+        elif status == "waiting_review":
             click.echo()
             click.echo("💡 Next steps:")
             click.echo(f"  zed review {commit.id[:8]}   # Review changes")
+            click.echo(f"  zed approve {commit.id[:8]}  # Apply to working tree")
+        elif status == "approved":
+            click.echo()
+            click.echo("💡 Next step:")
             click.echo(f"  zed approve {commit.id[:8]}  # Apply to working tree")
         
     except Exception as e:
@@ -255,12 +403,14 @@ def status(all: bool):
                 status_color = {
                     "waiting_review": "yellow",
                     "approved": "green", 
+                    "applied": "green",
                     "rejected": "red",
                 }.get(commit["status"], "white")
                 
                 status_icon = {
                     "waiting_review": "⏳",
                     "approved": "✅",
+                    "applied": "🚀",
                     "rejected": "❌",
                 }.get(commit["status"], "❓")
                 
@@ -365,26 +515,16 @@ def approve(commit_id: str, user: str):
             click.echo(f"❌ Commit {commit_id[:8]} not found", err=True)
             sys.exit(EXIT_USER_ERROR)
         
-        if commit.status == "approved":
-            click.echo(f"❌ Commit {commit_id[:8]} is already approved", err=True)
+        if commit.status == "applied":
+            click.echo(f"❌ Commit {commit_id[:8]} is already applied to working tree", err=True)
             sys.exit(EXIT_USER_ERROR)
         
         if commit.status == "rejected":
             click.echo(f"❌ Commit {commit_id[:8]} has been rejected", err=True)
             sys.exit(EXIT_USER_ERROR)
         
-        # Copy files to working tree
-        commit_dir = repo.commits_dir / commit.id
-        files_dir = commit_dir / "files"
-        
-        copied_files = []
-        for stored_file in files_dir.rglob("*"):
-            if stored_file.is_file():
-                relative_path = stored_file.relative_to(files_dir)
-                dest_path = repo.path / relative_path
-                dest_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(stored_file, dest_path)
-                copied_files.append(relative_path)
+        # Apply files to working tree using shared function
+        applied_files = _apply_commit_to_working_tree(repo, commit)
         
         # Update database
         from zed.core.db import connect
@@ -392,7 +532,7 @@ def approve(commit_id: str, user: str):
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE commits SET status = ?, approved_by = ?, approved_at = ? WHERE id = ?",
-                ("approved", user, int(time.time()), commit.id),
+                ("applied", user, int(time.time()), commit.id),
             )
             
             # Add to audit log
@@ -406,14 +546,14 @@ def approve(commit_id: str, user: str):
                     "commit_approved",
                     commit.id,
                     user,
-                    f"Applied {len(copied_files)} files to working tree",
+                    f"Applied {len(applied_files)} files to working tree",
                 ),
             )
             
             conn.commit()
         
         click.echo(f"✅ Approved commit {click.style(commit.id[:8], fg='cyan')}")
-        click.echo(f"📁 Applied {len(copied_files)} files to working tree")
+        click.echo(f"📁 Applied {len(applied_files)} files to working tree")
         click.echo()
         click.echo("💡 Changes are now live in your working directory!")
         
@@ -454,8 +594,8 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
             click.echo(f"❌ Commit {commit_id[:8]} not found", err=True)
             sys.exit(EXIT_USER_ERROR)
         
-        if commit.status == "approved":
-            click.echo(f"❌ Commit {commit_id[:8]} is already approved", err=True)
+        if commit.status == "applied":
+            click.echo(f"❌ Commit {commit_id[:8]} is already applied to working tree", err=True)
             sys.exit(EXIT_USER_ERROR)
         
         if commit.status == "rejected":
@@ -545,6 +685,42 @@ def test(rule: str, context: str):
         handle_error(e, "policy test")
 
 
+@policy.command()
+def validate():
+    """Validate policy rules in constraints.yaml."""
+    try:
+        repo = _find_repository()
+        constraints_path = repo.zed_dir / "constraints.yaml"
+        
+        if not constraints_path.exists():
+            click.echo(f"❌ No constraints.yaml found at {constraints_path}")
+            click.echo("💡 Create one with 'zed init' or manually create the file")
+            sys.exit(EXIT_USER_ERROR)
+        
+        click.echo(f"🔍 Validating {constraints_path}...")
+        
+        # Create a new policy manager to trigger validation
+        policy_mgr = PolicyManager(repo)
+        
+        if policy_mgr.rules:
+            click.echo(f"✅ {len(policy_mgr.rules)} valid rules loaded successfully")
+            click.echo()
+            click.echo("Rules summary:")
+            for i, rule in enumerate(policy_mgr.rules):
+                click.echo(f"  {i+1}. match: {rule.match}")
+                if rule.auto_approve:
+                    click.echo(f"     → auto-approve: true")
+                elif rule.require_role:
+                    click.echo(f"     → require_role: {rule.require_role}")
+                if rule.condition:
+                    click.echo(f"     → condition: {rule.condition}")
+        else:
+            click.echo("⚠️  No valid rules found")
+            
+    except Exception as e:
+        handle_error(e, "policy validate")
+
+
 def _find_repository() -> Repository:
     """Find repository with helpful error context."""
     current = Path.cwd()
@@ -582,10 +758,16 @@ def _resolve_commit_id(repo: Repository, partial_id: str) -> str:
         matches = cursor.fetchall()
         
         if not matches:
-            raise ValueError(f"No commit found matching {partial_id}")
+            raise ValueError(f"No commit found matching '{partial_id}'")
         
         if len(matches) > 1:
-            raise ValueError(f"Ambiguous commit ID {partial_id}, matches {len(matches)} commits")
+            commit_list = [match["id"][:8] for match in matches[:5]]
+            if len(matches) > 5:
+                commit_list.append("...")
+            raise ValueError(
+                f"Ambiguous commit ID '{partial_id}' matches {len(matches)} commits: {', '.join(commit_list)}\n"
+                f"💡 Use a longer prefix to disambiguate"
+            )
         
         return matches[0]["id"]
 

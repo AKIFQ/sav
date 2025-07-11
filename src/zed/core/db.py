@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Generator
 
 # Schema version
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 @contextmanager
@@ -63,8 +63,46 @@ def migrate(conn: sqlite3.Connection) -> None:
         cursor.execute("SELECT version FROM schema_version")
         current_version = cursor.fetchone()[0]
         if current_version < SCHEMA_VERSION:
-            # Future migrations would go here
-            pass
+            if current_version == 1:
+                _migrate_v1_to_v2(conn)
+
+
+def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
+    """Migrate from schema v1 to v2 - add 'applied' status."""
+    cursor = conn.cursor()
+    
+    # Create new commits table with updated status constraint
+    cursor.execute("""
+        CREATE TABLE commits_new (
+            id TEXT PRIMARY KEY,
+            message TEXT NOT NULL,
+            author TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('waiting_review', 'approved', 'applied', 'rejected')),
+            approved_by TEXT,
+            approved_at INTEGER,
+            fingerprint_id TEXT,
+            FOREIGN KEY (fingerprint_id) REFERENCES fingerprints(id)
+        )
+    """)
+    
+    # Copy data from old table
+    cursor.execute("""
+        INSERT INTO commits_new SELECT * FROM commits
+    """)
+    
+    # Drop old table and rename new one
+    cursor.execute("DROP TABLE commits")
+    cursor.execute("ALTER TABLE commits_new RENAME TO commits")
+    
+    # Recreate indexes
+    cursor.execute("CREATE INDEX idx_commits_status ON commits(status)")
+    cursor.execute("CREATE INDEX idx_commits_timestamp ON commits(timestamp)")
+    
+    # Update schema version
+    cursor.execute("UPDATE schema_version SET version = 2")
+    
+    conn.commit()
 
 
 def _create_schema_v1(conn: sqlite3.Connection) -> None:
@@ -75,7 +113,7 @@ def _create_schema_v1(conn: sqlite3.Connection) -> None:
         CREATE TABLE schema_version (
             version INTEGER PRIMARY KEY
         );
-        INSERT INTO schema_version (version) VALUES (1);
+        INSERT INTO schema_version (version) VALUES (2);
 
         -- Commits table
         CREATE TABLE commits (
@@ -83,7 +121,7 @@ def _create_schema_v1(conn: sqlite3.Connection) -> None:
             message TEXT NOT NULL,
             author TEXT NOT NULL,
             timestamp INTEGER NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('waiting_review', 'approved', 'rejected')),
+            status TEXT NOT NULL CHECK (status IN ('waiting_review', 'approved', 'applied', 'rejected')),
             approved_by TEXT,
             approved_at INTEGER,
             fingerprint_id TEXT,

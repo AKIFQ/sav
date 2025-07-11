@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from ruamel.yaml import YAML
+import difflib
 
 
 class PolicyRule:
@@ -85,6 +86,31 @@ class PolicyManager:
         self.rules: list[PolicyRule] = []
         self._load_rules()
 
+    def _suggest_typo_fix(self, unknown_key: str) -> str:
+        """Suggest correction for typos in rule keys."""
+        valid_keys = ["match", "auto_approve", "require_role", "condition"]
+        suggestions = difflib.get_close_matches(unknown_key, valid_keys, n=1, cutoff=0.6)
+        if suggestions:
+            return f" (did you mean '{suggestions[0]}'?)"
+        return ""
+
+    def _validate_rule_keys(self, rule_dict: dict, rule_number: int):
+        """Validate rule has correct keys and suggest fixes for typos."""
+        valid_keys = {"match", "auto_approve", "require_role", "condition"}
+        unknown_keys = set(rule_dict.keys()) - valid_keys
+        
+        if unknown_keys:
+            for key in unknown_keys:
+                suggestion = self._suggest_typo_fix(key)
+                print(f"⚠️  Warning: Unknown key '{key}' in rule #{rule_number}{suggestion}")
+        
+        # Check for common mistakes
+        if "auto_approve" in rule_dict and not isinstance(rule_dict["auto_approve"], bool):
+            print(f"⚠️  Warning: 'auto_approve' should be true/false, not '{rule_dict['auto_approve']}' in rule #{rule_number}")
+        
+        if "condition" in rule_dict and not isinstance(rule_dict["condition"], str):
+            print(f"⚠️  Warning: 'condition' should be a string expression in rule #{rule_number}")
+
     def _load_rules(self):
         """Load rules from constraints.yaml."""
         if not self.constraints_path.exists():
@@ -92,25 +118,38 @@ class PolicyManager:
             self.rules = []
             return
         
-        yaml = YAML()
-        yaml.preserve_quotes = True
-        
-        with open(self.constraints_path, "r") as f:
-            data = yaml.load(f)
+        try:
+            yaml = YAML()
+            yaml.preserve_quotes = True
+            
+            with open(self.constraints_path, "r") as f:
+                data = yaml.load(f)
+        except Exception as e:
+            print(f"❌ Error loading {self.constraints_path.name}: {e}")
+            print(f"💡 Check YAML syntax and try again")
+            self.rules = []
+            return
         
         if not data or "rules" not in data:
+            print(f"⚠️  Warning: No 'rules' section found in {self.constraints_path.name}")
+            print(f"💡 Add a 'rules:' section with policy rules")
             self.rules = []
             return
         
         # Load each rule
         self.rules = []
-        for rule_dict in data["rules"]:
+        for i, rule_dict in enumerate(data["rules"]):
             try:
+                # Validate rule keys
+                self._validate_rule_keys(rule_dict, i + 1)
                 rule = PolicyRule(rule_dict)
                 self.rules.append(rule)
             except ValueError as e:
-                # Skip invalid rules
-                print(f"Warning: Skipping invalid rule: {e}")
+                # Skip invalid rules with helpful context
+                print(f"⚠️  Warning: Skipping invalid rule #{i+1} in {self.constraints_path.name}")
+                print(f"   Error: {e}")
+                print(f"   Rule: {rule_dict}")
+                print(f"   💡 Fix the rule syntax and run 'zed status' to reload")
 
     def evaluate(self, fingerprint, files: list[Path]) -> dict:
         """Evaluate policy rules against a commit fingerprint.
