@@ -38,16 +38,16 @@ jobs:
         cd test_cli_workspace
         
         # Test init
-        zed init
+        sav init
         
         # Create test file
         echo "print('Hello Shadow VCS')" > hello.py
         
         # Test commit
-        zed commit -m "Test commit" hello.py
+        sav commit -m "Test commit" hello.py
         
         # Test status
-        zed status --all
+        sav status --all
         
         cd ..
         rm -rf test_cli_workspace 

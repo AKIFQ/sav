@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Optional
 from functools import lru_cache
 
-from zed.core.db import connect
-from zed.utils.diff import is_binary_file
+from sav.core.db import connect
+from sav.utils.diff import is_binary_file
 
 
 class Fingerprint:

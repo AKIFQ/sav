@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from zed.core.db import SCHEMA_VERSION, connect, init_database, migrate
+from sav.core.db import SCHEMA_VERSION, connect, init_database, migrate
 
 
 class TestDatabase:

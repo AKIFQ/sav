@@ -11,25 +11,25 @@ class Repository:
     def __init__(self, path: Path):
         """Initialize repository at given path."""
         self.path = Path(path).resolve()
-        self.zed_dir = self.path / ".zed"
-        self.commits_dir = self.zed_dir / "commits"
-        self.fingerprints_dir = self.zed_dir / "fingerprints"
-        self.db_path = self.zed_dir / "index.sqlite"
-        self.lock_path = self.zed_dir / ".lock"
-        self.constraints_path = self.zed_dir / "constraints.yaml"
+        self.sav_dir = self.path / ".sav"
+        self.commits_dir = self.sav_dir / "commits"
+        self.fingerprints_dir = self.sav_dir / "fingerprints"
+        self.db_path = self.sav_dir / "index.sqlite"
+        self.lock_path = self.sav_dir / ".lock"
+        self.constraints_path = self.sav_dir / "constraints.yaml"
 
     def init(self):
         """Initialize a new Shadow VCS repository."""
-        if self.zed_dir.exists():
+        if self.sav_dir.exists():
             raise ValueError(f"Shadow VCS repository already exists at {self.path}")
 
         # Create directory structure
-        self.zed_dir.mkdir(exist_ok=True)
+        self.sav_dir.mkdir(exist_ok=True)
         self.commits_dir.mkdir(exist_ok=True)
         self.fingerprints_dir.mkdir(exist_ok=True)
 
         # Initialize SQLite database with schema
-        from zed.core.db import init_database
+        from sav.core.db import init_database
         init_database(self.db_path)
 
         # Create constraints file with default conservative rules
@@ -60,14 +60,14 @@ rules:
 
     def exists(self) -> bool:
         """Check if this is a valid Shadow VCS repository."""
-        return self.zed_dir.exists() and self.db_path.exists()
+        return self.sav_dir.exists() and self.db_path.exists()
 
     def validate(self) -> list[str]:
         """Validate repository structure and return list of issues."""
         issues = []
         
-        if not self.zed_dir.exists():
-            issues.append(".zed directory missing")
+        if not self.sav_dir.exists():
+            issues.append(".sav directory missing")
             return issues
         
         if not self.commits_dir.exists():
@@ -84,7 +84,7 @@ rules:
         
         # Validate database integrity
         try:
-            from zed.core.db import verify_database_integrity
+            from sav.core.db import verify_database_integrity
             if not verify_database_integrity(self.db_path):
                 issues.append("database integrity check failed")
         except Exception as e:
@@ -92,7 +92,7 @@ rules:
         
         # Validate constraints file
         try:
-            from zed.core.policy import PolicyManager
+            from sav.core.policy import PolicyManager
             policy_mgr = PolicyManager(self)
             if not policy_mgr.rules:
                 issues.append("no valid policy rules found")

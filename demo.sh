@@ -1,313 +1,325 @@
 #!/bin/bash
-
-# Zed Shadow VCS Demo Script
-# Simplified version for sequential execution with 1-2 screenshots
+# Sav Shadow VCS Demo Script
 
 set -e
 
-echo "Setting up Zed Shadow VCS Demo Environment..."
-echo "=============================================="
+echo "🚀 SAV SHADOW VCS DEMO"
+echo "Setting up Sav Shadow VCS Demo Environment..."
 
-# Create demo directory
-DEMO_DIR="zed_demo_project"
-rm -rf "$DEMO_DIR"
-mkdir -p "$DEMO_DIR"
-cd "$DEMO_DIR"
+# Clean up any existing demo
+if [ -d "demo_project" ]; then
+    echo "Cleaning up existing demo..."
+    rm -rf demo_project
+fi
 
-echo "Created demo directory: $DEMO_DIR"
+# Create demo project
+mkdir -p demo_project
+cd demo_project
 
-# Initialize Zed repository
+# Initialize Sav repository
 echo ""
-echo "Initializing Zed repository..."
-zed init
+echo "Initializing Sav repository..."
+sav init
 
 echo ""
-echo "Zed repository initialized in .zed/"
+echo "Sav repository initialized in .sav/"
 
-# Create a realistic project structure
+# Create project structure
 echo ""
 echo "Creating realistic project structure..."
 
-# Create directories
-mkdir -p src/auth src/api src/utils docs tests
+# Main application package
+mkdir -p src/app
+cat > src/app/__init__.py << 'EOF'
+"""
+Main application package for Sav Demo Project.
+"""
 
-# Create main application files
-cat > src/__init__.py << 'EOF'
-"""
-Main application package for Zed Demo Project.
-A realistic web application with authentication and API endpoints.
-"""
 __version__ = "1.0.0"
+__author__ = "Sav Demo Team"
 EOF
 
-cat > src/auth/__init__.py << 'EOF'
-"""Authentication module for the web application."""
-EOF
+# Database models
+cat > src/app/models.py << 'EOF'
+"""Database models for the Sav Demo application."""
 
-cat > src/auth/authenticator.py << 'EOF'
-"""
-Authentication service for user management.
-Handles login, registration, and session management.
-"""
+from dataclasses import dataclass
+from typing import Optional, List
+from datetime import datetime
+import sqlite3
 import hashlib
-import os
-import jwt
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+import secrets
 
-class Authenticator:
-    """Main authentication service."""
+
+@dataclass
+class User:
+    """User model with authentication capabilities."""
+    id: Optional[int] = None
+    username: str = ""
+    email: str = ""
+    password_hash: str = ""
+    created_at: Optional[datetime] = None
+    is_active: bool = True
     
-    def __init__(self, secret_key: str = None):
-        self.secret_key = secret_key or os.environ.get('JWT_SECRET', 'default-secret-key')
-        self.users = {}
+    def set_password(self, password: str) -> None:
+        """Hash and set the user's password."""
+        salt = secrets.token_hex(16)
+        password_hash = hashlib.pbkdf2_hmac('sha256', 
+                                          password.encode('utf-8'), 
+                                          salt.encode('utf-8'), 
+                                          100000)
+        self.password_hash = salt + password_hash.hex()
     
-    def hash_password(self, password: str) -> str:
-        """Hash a password using SHA-256."""
-        return hashlib.sha256(password.encode()).hexdigest()
-    
-    def register_user(self, username: str, password: str, email: str) -> bool:
-        """Register a new user."""
-        if username in self.users:
+    def check_password(self, password: str) -> bool:
+        """Verify the user's password."""
+        if not self.password_hash:
             return False
         
-        self.users[username] = {
-            'password_hash': self.hash_password(password),
-            'email': email,
-            'created_at': datetime.now(),
-            'is_active': True
-        }
-        return True
-    
-    def authenticate(self, username: str, password: str) -> Optional[str]:
-        """Authenticate a user and return JWT token."""
-        user = self.users.get(username)
-        if not user or not user['is_active']:
-            return None
+        salt = self.password_hash[:32]
+        stored_hash = self.password_hash[32:]
         
-        if user['password_hash'] == self.hash_password(password):
-            return self._generate_token(username)
-        return None
+        password_hash = hashlib.pbkdf2_hmac('sha256',
+                                          password.encode('utf-8'),
+                                          salt.encode('utf-8'),
+                                          100000)
+        return stored_hash == password_hash.hex()
+
+
+@dataclass
+class Task:
+    """Task model for project management."""
+    id: Optional[int] = None
+    title: str = ""
+    description: str = ""
+    assignee_id: Optional[int] = None
+    priority: str = "medium"  # low, medium, high, critical
+    status: str = "todo"  # todo, in_progress, done, blocked
+    created_at: Optional[datetime] = None
+    due_date: Optional[datetime] = None
+    tags: List[str] = None
     
-    def _generate_token(self, username: str) -> str:
-        """Generate JWT token for user."""
-        payload = {
-            'username': username,
-            'exp': datetime.utcnow() + timedelta(hours=24),
-            'iat': datetime.utcnow()
-        }
-        return jwt.encode(payload, self.secret_key, algorithm='HS256')
+    def __post_init__(self):
+        if self.tags is None:
+            self.tags = []
+
+
+class DatabaseManager:
+    """Database operations manager."""
     
-    def verify_token(self, token: str) -> Optional[Dict[str, Any]]:
-        """Verify JWT token and return payload."""
-        try:
-            return jwt.decode(token, self.secret_key, algorithms=['HS256'])
-        except jwt.InvalidTokenError:
+    def __init__(self, db_path: str = "demo.db"):
+        self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize the database schema."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT UNIQUE NOT NULL,
+                    email TEXT UNIQUE NOT NULL,
+                    password_hash TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_active BOOLEAN DEFAULT TRUE
+                )
+            ''')
+            
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    assignee_id INTEGER,
+                    priority TEXT DEFAULT 'medium',
+                    status TEXT DEFAULT 'todo',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    due_date TIMESTAMP,
+                    tags TEXT,
+                    FOREIGN KEY (assignee_id) REFERENCES users (id)
+                )
+            ''')
+            
+            conn.commit()
+    
+    def create_user(self, user: User) -> int:
+        """Create a new user and return the ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO users (username, email, password_hash, is_active)
+                VALUES (?, ?, ?, ?)
+            ''', (user.username, user.email, user.password_hash, user.is_active))
+            
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_user_by_username(self, username: str) -> Optional[User]:
+        """Retrieve a user by username."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM users WHERE username = ? AND is_active = TRUE
+            ''', (username,))
+            
+            row = cursor.fetchone()
+            if row:
+                return User(
+                    id=row['id'],
+                    username=row['username'],
+                    email=row['email'],
+                    password_hash=row['password_hash'],
+                    created_at=datetime.fromisoformat(row['created_at']),
+                    is_active=bool(row['is_active'])
+                )
             return None
+    
+    def create_task(self, task: Task) -> int:
+        """Create a new task and return the ID."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO tasks (title, description, assignee_id, priority, status, due_date, tags)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (task.title, task.description, task.assignee_id, 
+                  task.priority, task.status, task.due_date, 
+                  ','.join(task.tags) if task.tags else ''))
+            
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_tasks_by_user(self, user_id: int) -> List[Task]:
+        """Get all tasks assigned to a user."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT * FROM tasks WHERE assignee_id = ? ORDER BY created_at DESC
+            ''', (user_id,))
+            
+            tasks = []
+            for row in cursor.fetchall():
+                task = Task(
+                    id=row['id'],
+                    title=row['title'],
+                    description=row['description'],
+                    assignee_id=row['assignee_id'],
+                    priority=row['priority'],
+                    status=row['status'],
+                    created_at=datetime.fromisoformat(row['created_at']),
+                    due_date=datetime.fromisoformat(row['due_date']) if row['due_date'] else None,
+                    tags=row['tags'].split(',') if row['tags'] else []
+                )
+                tasks.append(task)
+            
+            return tasks
 EOF
 
-cat > src/api/__init__.py << 'EOF'
-"""API endpoints for the web application."""
-EOF
-
-cat > src/api/routes.py << 'EOF'
+# Configuration settings
+cat > src/app/config.py << 'EOF'
 """
-API route definitions for the web application.
-Handles HTTP endpoints and request processing.
+Configuration settings for the Sav Demo application.
 """
-from flask import Flask, request, jsonify
-from src.auth.authenticator import Authenticator
-import logging
 
-app = Flask(__name__)
-auth_service = Authenticator()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint."""
-    return jsonify({'status': 'healthy', 'service': 'zed-demo-api'})
-
-@app.route('/api/auth/register', methods=['POST'])
-def register():
-    """User registration endpoint."""
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    email = data.get('email')
-    
-    if not all([username, password, email]):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    if auth_service.register_user(username, password, email):
-        return jsonify({'message': 'User registered successfully'}), 201
-    else:
-        return jsonify({'error': 'Username already exists'}), 409
-
-@app.route('/api/auth/login', methods=['POST'])
-def login():
-    """User login endpoint."""
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    
-    if not all([username, password]):
-        return jsonify({'error': 'Missing credentials'}), 400
-    
-    token = auth_service.authenticate(username, password)
-    if token:
-        return jsonify({'token': token, 'message': 'Login successful'}), 200
-    else:
-        return jsonify({'error': 'Invalid credentials'}), 401
-
-@app.route('/api/user/profile', methods=['GET'])
-def get_profile():
-    """Get user profile (requires authentication)."""
-    auth_header = request.headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        return jsonify({'error': 'Missing or invalid authorization header'}), 401
-    
-    token = auth_header.split(' ')[1]
-    payload = auth_service.verify_token(token)
-    
-    if not payload:
-        return jsonify({'error': 'Invalid or expired token'}), 401
-    
-    username = payload['username']
-    user = auth_service.users.get(username)
-    
-    if not user:
-        return jsonify({'error': 'User not found'}), 404
-    
-    return jsonify({
-        'username': username,
-        'email': user['email'],
-        'created_at': user['created_at'].isoformat(),
-        'is_active': user['is_active']
-    }), 200
-
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
-EOF
-
-cat > src/utils/__init__.py << 'EOF'
-"""Utility functions for the application."""
-EOF
-
-cat > src/utils/helpers.py << 'EOF'
-"""
-Helper utilities for the web application.
-Common functions used across the application.
-"""
-import re
-import hashlib
-from typing import List, Dict, Any
-from datetime import datetime
-
-def validate_email(email: str) -> bool:
-    """Validate email format."""
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return re.match(pattern, email) is not None
-
-def sanitize_input(text: str) -> str:
-    """Sanitize user input to prevent XSS."""
-    return text.replace('<', '&lt;').replace('>', '&gt;')
-
-def generate_api_key() -> str:
-    """Generate a secure API key."""
-    timestamp = str(datetime.now().timestamp())
-    random_data = f"{timestamp}-{hashlib.md5(timestamp.encode()).hexdigest()}"
-    return hashlib.sha256(random_data.encode()).hexdigest()[:32]
-
-def format_response(data: Any, success: bool = True, message: str = "") -> Dict[str, Any]:
-    """Format API response consistently."""
-    return {
-        'success': success,
-        'message': message,
-        'data': data,
-        'timestamp': datetime.now().isoformat()
-    }
-
-def log_activity(user: str, action: str, details: Dict[str, Any] = None):
-    """Log user activity for audit purposes."""
-    log_entry = {
-        'user': user,
-        'action': action,
-        'timestamp': datetime.now().isoformat(),
-        'details': details or {}
-    }
-    # In a real application, this would write to a proper logging system
-    print(f"ACTIVITY_LOG: {log_entry}")
-EOF
-
-cat > config.py << 'EOF'
-"""
-Configuration settings for the Zed Demo application.
-"""
 import os
-from typing import Dict, Any
+from dataclasses import dataclass
+from typing import Optional
 
-class Config:
-    """Application configuration."""
-    
-    # Database settings
-    DATABASE_URL = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
-    
-    # Security settings
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-    JWT_SECRET = os.environ.get('JWT_SECRET', 'jwt-secret-key-change-in-production')
-    
-    # API settings
-    API_HOST = os.environ.get('API_HOST', '0.0.0.0')
-    API_PORT = int(os.environ.get('API_PORT', 5000))
-    DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
-    
-    # Logging settings
-    LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
-    LOG_FILE = os.environ.get('LOG_FILE', 'app.log')
-    
-    # Rate limiting
-    RATE_LIMIT_PER_MINUTE = int(os.environ.get('RATE_LIMIT_PER_MINUTE', 100))
+
+@dataclass
+class DatabaseConfig:
+    """Database configuration."""
+    host: str = "localhost"
+    port: int = 5432
+    database: str = "sav_demo"
+    username: str = "demo_user"
+    password: str = "demo_password"
+    pool_size: int = 10
+    max_overflow: int = 20
     
     @classmethod
-    def to_dict(cls) -> Dict[str, Any]:
-        """Convert config to dictionary."""
-        return {
-            'database_url': cls.DATABASE_URL,
-            'api_host': cls.API_HOST,
-            'api_port': cls.API_PORT,
-            'debug': cls.DEBUG,
-            'log_level': cls.LOG_LEVEL,
-            'rate_limit': cls.RATE_LIMIT_PER_MINUTE
-        }
+    def from_env(cls) -> 'DatabaseConfig':
+        """Load database config from environment variables."""
+        return cls(
+            host=os.getenv('DB_HOST', 'localhost'),
+            port=int(os.getenv('DB_PORT', '5432')),
+            database=os.getenv('DB_NAME', 'sav_demo'),
+            username=os.getenv('DB_USER', 'demo_user'),
+            password=os.getenv('DB_PASSWORD', 'demo_password'),
+            pool_size=int(os.getenv('DB_POOL_SIZE', '10')),
+            max_overflow=int(os.getenv('DB_MAX_OVERFLOW', '20'))
+        )
+
+
+@dataclass
+class SecurityConfig:
+    """Security configuration."""
+    secret_key: str = "your-secret-key-here"
+    jwt_expiration_hours: int = 24
+    password_min_length: int = 8
+    max_login_attempts: int = 5
+    lockout_duration_minutes: int = 15
+    
+    @classmethod
+    def from_env(cls) -> 'SecurityConfig':
+        """Load security config from environment variables."""
+        return cls(
+            secret_key=os.getenv('SECRET_KEY', 'your-secret-key-here'),
+            jwt_expiration_hours=int(os.getenv('JWT_EXPIRATION_HOURS', '24')),
+            password_min_length=int(os.getenv('PASSWORD_MIN_LENGTH', '8')),
+            max_login_attempts=int(os.getenv('MAX_LOGIN_ATTEMPTS', '5')),
+            lockout_duration_minutes=int(os.getenv('LOCKOUT_DURATION_MINUTES', '15'))
+        )
+
+
+@dataclass
+class AppConfig:
+    """Main application configuration."""
+    debug: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8000
+    log_level: str = "INFO"
+    database: DatabaseConfig = None
+    security: SecurityConfig = None
+    
+    def __post_init__(self):
+        if self.database is None:
+            self.database = DatabaseConfig.from_env()
+        if self.security is None:
+            self.security = SecurityConfig.from_env()
+    
+    @classmethod
+    def from_env(cls) -> 'AppConfig':
+        """Load application config from environment variables."""
+        return cls(
+            debug=os.getenv('DEBUG', 'False').lower() == 'true',
+            host=os.getenv('HOST', '0.0.0.0'),
+            port=int(os.getenv('PORT', '8000')),
+            log_level=os.getenv('LOG_LEVEL', 'INFO').upper(),
+            database=DatabaseConfig.from_env(),
+            security=SecurityConfig.from_env()
+        )
+
+
+# Global configuration instance
+config = AppConfig.from_env()
 EOF
 
-cat > requirements.txt << 'EOF'
-Flask==2.3.3
-PyJWT==2.8.0
-Werkzeug==2.3.7
-python-dotenv==1.0.0
-requests==2.31.0
-pytest==7.4.2
-black==23.9.1
-flake8==6.1.0
-EOF
-
+# Create README
 cat > README.md << 'EOF'
-# Zed Demo Project
+# Sav Demo Project
 
-A realistic web application demonstrating Zed Shadow VCS capabilities.
+A realistic web application demonstrating Sav Shadow VCS capabilities.
 
 ## Features
 
-- User authentication with JWT tokens
+- User authentication and authorization
+- Task management system
 - RESTful API endpoints
-- Input validation and sanitization
-- Activity logging
+- Database integration with SQLite
 - Configuration management
+- Comprehensive error handling
+- Security best practices
 
 ## Setup
 
@@ -316,187 +328,342 @@ A realistic web application demonstrating Zed Shadow VCS capabilities.
    pip install -r requirements.txt
    ```
 
-2. Run the application:
+2. Initialize the database:
    ```bash
-   python src/api/routes.py
+   python -m src.app.models
    ```
 
-3. Test endpoints:
+3. Run the application:
    ```bash
-   curl http://localhost:5000/api/health
+   python -m src.app.main
    ```
 
 ## API Endpoints
 
-- `GET /api/health` - Health check
+- `POST /api/auth/login` - User authentication
 - `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
-- `GET /api/user/profile` - Get user profile (authenticated)
+- `GET /api/tasks` - List user tasks
+- `POST /api/tasks` - Create new task
+- `PUT /api/tasks/{id}` - Update task
+- `DELETE /api/tasks/{id}` - Delete task
 
-## Development
+## Configuration
 
-This project uses Zed Shadow VCS for secure code management.
+This project uses Sav Shadow VCS for secure code management.
+
+Set environment variables in `.env` file for configuration.
 EOF
 
-cat > tests/__init__.py << 'EOF'
-"""Test suite for the Zed Demo application."""
-EOF
+# Create test file
+mkdir -p tests
+cat > tests/test_models.py << 'EOF'
+"""Test suite for the Sav Demo application."""
 
-cat > tests/test_auth.py << 'EOF'
-"""
-Tests for authentication functionality.
-"""
-import pytest
-from src.auth.authenticator import Authenticator
-
-class TestAuthenticator:
-    """Test cases for Authenticator class."""
-    
-    def test_register_user(self):
-        """Test user registration."""
-        auth = Authenticator()
-        assert auth.register_user("testuser", "password123", "test@example.com")
-        assert "testuser" in auth.users
-    
-    def test_duplicate_registration(self):
-        """Test duplicate user registration."""
-        auth = Authenticator()
-        auth.register_user("testuser", "password123", "test@example.com")
-        assert not auth.register_user("testuser", "password456", "test2@example.com")
-    
-    def test_authentication(self):
-        """Test user authentication."""
-        auth = Authenticator()
-        auth.register_user("testuser", "password123", "test@example.com")
-        token = auth.authenticate("testuser", "password123")
-        assert token is not None
-    
-    def test_invalid_credentials(self):
-        """Test authentication with invalid credentials."""
-        auth = Authenticator()
-        auth.register_user("testuser", "password123", "test@example.com")
-        token = auth.authenticate("testuser", "wrongpassword")
-        assert token is None
-EOF
-
-cat > tests/test_api.py << 'EOF'
-"""
-Tests for API endpoints.
-"""
-import pytest
-from src.api.routes import app
-from src.auth.authenticator import Authenticator
-
-@pytest.fixture
-def client():
-    """Create test client."""
-    app.config['TESTING'] = True
-    with app.test_client() as client:
-        yield client
-
-class TestAPIEndpoints:
-    """Test cases for API endpoints."""
-    
-    def test_health_check(self, client):
-        """Test health check endpoint."""
-        response = client.get('/api/health')
-        assert response.status_code == 200
-        data = response.get_json()
-        assert data['status'] == 'healthy'
-    
-    def test_register_user(self, client):
-        """Test user registration endpoint."""
-        data = {
-            'username': 'testuser',
-            'password': 'password123',
-            'email': 'test@example.com'
-        }
-        response = client.post('/api/auth/register', json=data)
-        assert response.status_code == 201
-    
-    def test_login_user(self, client):
-        """Test user login endpoint."""
-        # First register a user
-        register_data = {
-            'username': 'testuser',
-            'password': 'password123',
-            'email': 'test@example.com'
-        }
-        client.post('/api/auth/register', json=register_data)
-        
-        # Then try to login
-        login_data = {
-            'username': 'testuser',
-            'password': 'password123'
-        }
-        response = client.post('/api/auth/login', json=login_data)
-        assert response.status_code == 200
-        data = response.get_json()
-        assert 'token' in data
-EOF
-
-echo ""
-echo "Created realistic project structure with:"
-echo "   - Python web application with authentication"
-echo "   - API endpoints and utilities"
-echo "   - Configuration management"
-echo "   - Test suite"
-echo "   - Documentation"
-
-echo ""
-echo "Starting Zed Demo Commands..."
-echo "============================="
-
-# Create risky AI-generated code
-echo ""
-echo "Creating risky AI-generated code..."
-
-cat > src/debug_utils.py << 'EOF'
+import unittest
+import tempfile
 import os
-import logging
+from datetime import datetime
+from src.app.models import User, Task, DatabaseManager
 
-def debug_environment():
-    """Debug function that logs sensitive environment variables."""
-    logging.info(f"Database URL: {os.environ.get('DATABASE_URL')}")
-    logging.info(f"Secret Key: {os.environ.get('SECRET_KEY')}")
-    logging.info(f"JWT Secret: {os.environ.get('JWT_SECRET')}")
-    return True
 
-def get_all_env_vars():
-    """Get all environment variables for debugging."""
-    return dict(os.environ)
+class TestUser(unittest.TestCase):
+    """Test cases for User model."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        self.user = User(username="testuser", email="test@example.com")
+    
+    def test_set_password(self):
+        """Test password hashing."""
+        password = "secure_password123"
+        self.user.set_password(password)
+        
+        self.assertIsNotNone(self.user.password_hash)
+        self.assertNotEqual(self.user.password_hash, password)
+        self.assertTrue(len(self.user.password_hash) > 50)
+    
+    def test_check_password(self):
+        """Test password verification."""
+        password = "secure_password123"
+        self.user.set_password(password)
+        
+        self.assertTrue(self.user.check_password(password))
+        self.assertFalse(self.user.check_password("wrong_password"))
+    
+    def test_check_password_empty_hash(self):
+        """Test password check with empty hash."""
+        self.assertFalse(self.user.check_password("any_password"))
 
-def log_user_credentials(username, password):
-    """Log user credentials for debugging (DANGEROUS!)."""
-    logging.warning(f"User login attempt: {username}")
-    logging.warning(f"Password hash: {hash(password)}")
-    return True
+
+class TestTask(unittest.TestCase):
+    """Test cases for Task model."""
+    
+    def test_task_creation(self):
+        """Test task creation with defaults."""
+        task = Task(title="Test Task", description="Test Description")
+        
+        self.assertEqual(task.title, "Test Task")
+        self.assertEqual(task.description, "Test Description")
+        self.assertEqual(task.priority, "medium")
+        self.assertEqual(task.status, "todo")
+        self.assertIsInstance(task.tags, list)
+        self.assertEqual(len(task.tags), 0)
+    
+    def test_task_with_tags(self):
+        """Test task creation with tags."""
+        task = Task(title="Test Task", tags=["urgent", "backend"])
+        
+        self.assertEqual(len(task.tags), 2)
+        self.assertIn("urgent", task.tags)
+        self.assertIn("backend", task.tags)
+
+
+class TestDatabaseManager(unittest.TestCase):
+    """Test cases for DatabaseManager."""
+    
+    def setUp(self):
+        """Set up test database."""
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False)
+        self.temp_db.close()
+        self.db_manager = DatabaseManager(self.temp_db.name)
+    
+    def tearDown(self):
+        """Clean up test database."""
+        os.unlink(self.temp_db.name)
+    
+    def test_create_user(self):
+        """Test user creation."""
+        user = User(username="testuser", email="test@example.com")
+        user.set_password("password123")
+        
+        user_id = self.db_manager.create_user(user)
+        self.assertIsInstance(user_id, int)
+        self.assertGreater(user_id, 0)
+    
+    def test_get_user_by_username(self):
+        """Test user retrieval."""
+        user = User(username="testuser", email="test@example.com")
+        user.set_password("password123")
+        
+        user_id = self.db_manager.create_user(user)
+        retrieved_user = self.db_manager.get_user_by_username("testuser")
+        
+        self.assertIsNotNone(retrieved_user)
+        self.assertEqual(retrieved_user.username, "testuser")
+        self.assertEqual(retrieved_user.email, "test@example.com")
+        self.assertEqual(retrieved_user.id, user_id)
+    
+    def test_create_task(self):
+        """Test task creation."""
+        # Create a user first
+        user = User(username="testuser", email="test@example.com")
+        user.set_password("password123")
+        user_id = self.db_manager.create_user(user)
+        
+        # Create a task
+        task = Task(
+            title="Test Task",
+            description="Test Description",
+            assignee_id=user_id,
+            priority="high",
+            tags=["test", "demo"]
+        )
+        
+        task_id = self.db_manager.create_task(task)
+        self.assertIsInstance(task_id, int)
+        self.assertGreater(task_id, 0)
+    
+    def test_get_tasks_by_user(self):
+        """Test task retrieval by user."""
+        # Create a user
+        user = User(username="testuser", email="test@example.com")
+        user.set_password("password123")
+        user_id = self.db_manager.create_user(user)
+        
+        # Create tasks
+        task1 = Task(title="Task 1", assignee_id=user_id)
+        task2 = Task(title="Task 2", assignee_id=user_id)
+        
+        self.db_manager.create_task(task1)
+        self.db_manager.create_task(task2)
+        
+        # Retrieve tasks
+        tasks = self.db_manager.get_tasks_by_user(user_id)
+        
+        self.assertEqual(len(tasks), 2)
+        self.assertEqual(tasks[0].title, "Task 2")  # Most recent first
+        self.assertEqual(tasks[1].title, "Task 1")
+
+
+if __name__ == '__main__':
+    unittest.main()
 EOF
 
 echo ""
-echo "Demo setup complete!"
-echo "==================="
+echo "Starting Sav Demo Commands..."
+
+# Create first commit
 echo ""
-echo "Commands to run for screenshots:"
+echo "📝 Creating first commit with project structure..."
+sav commit -m "Initial project structure with models and config" src/app/__init__.py src/app/models.py src/app/config.py README.md tests/test_models.py
+
+# Show status
 echo ""
-echo "1. Safe documentation commit (auto-approved):"
-echo "   zed commit -m \"Add project documentation\" README.md"
+echo "📊 Current repository status:"
+sav status --all
+
+# Create additional files to demonstrate more commits
 echo ""
-echo "2. AI-generated risky code (requires review):"
-echo "   zed commit -m \"AI: Add debug logging with sensitive data\" -a \"gpt-4\" src/debug_utils.py"
+echo "📝 Adding API endpoints..."
+
+mkdir -p src/app/api
+cat > src/app/api/__init__.py << 'EOF'
+"""API package for the Sav Demo application."""
+EOF
+
+cat > src/app/api/auth.py << 'EOF'
+"""Authentication API endpoints."""
+
+from datetime import datetime, timedelta
+from typing import Optional
+import jwt
+from src.app.models import User, DatabaseManager
+from src.app.config import config
+
+
+class AuthenticationError(Exception):
+    """Authentication related errors."""
+    pass
+
+
+class AuthService:
+    """Authentication service."""
+    
+    def __init__(self):
+        self.db = DatabaseManager()
+    
+    def authenticate_user(self, username: str, password: str) -> Optional[User]:
+        """Authenticate user with username and password."""
+        user = self.db.get_user_by_username(username)
+        if user and user.check_password(password):
+            return user
+        return None
+    
+    def generate_token(self, user: User) -> str:
+        """Generate JWT token for authenticated user."""
+        payload = {
+            'user_id': user.id,
+            'username': user.username,
+            'exp': datetime.utcnow() + timedelta(hours=config.security.jwt_expiration_hours)
+        }
+        
+        return jwt.encode(payload, config.security.secret_key, algorithm='HS256')
+    
+    def verify_token(self, token: str) -> Optional[dict]:
+        """Verify JWT token and return payload."""
+        try:
+            payload = jwt.decode(token, config.security.secret_key, algorithms=['HS256'])
+            return payload
+        except jwt.ExpiredSignatureError:
+            raise AuthenticationError("Token has expired")
+        except jwt.InvalidTokenError:
+            raise AuthenticationError("Invalid token")
+    
+    def register_user(self, username: str, email: str, password: str) -> User:
+        """Register a new user."""
+        # Check if user already exists
+        existing_user = self.db.get_user_by_username(username)
+        if existing_user:
+            raise AuthenticationError("Username already exists")
+        
+        # Validate password strength
+        if len(password) < config.security.password_min_length:
+            raise AuthenticationError(f"Password must be at least {config.security.password_min_length} characters")
+        
+        # Create new user
+        user = User(username=username, email=email)
+        user.set_password(password)
+        
+        user_id = self.db.create_user(user)
+        user.id = user_id
+        
+        return user
+EOF
+
+# Commit API changes
 echo ""
-echo "3. Status dashboard:"
-echo "   zed status --all"
+echo "📝 Committing API endpoints..."
+sav commit -m "Add authentication API with JWT support" src/app/api/__init__.py src/app/api/auth.py
+
+# Show repository status
 echo ""
-echo "4. Review risky commit (replace [HASH] with actual commit hash):"
-echo "   zed review [HASH]"
+echo "📊 Repository status after API commit:"
+sav status --all
+
+# Create a high-risk file to demonstrate policy enforcement
 echo ""
-echo "5. Reject risky commit:"
-echo "   zed reject [HASH] -r \"Security concern: logging sensitive environment variables\""
+echo "🔒 Creating a potentially risky file..."
+
+cat > src/app/secrets.py << 'EOF'
+"""
+WARNING: This file contains sensitive configuration.
+This is a demo file to show Sav's risk assessment capabilities.
+"""
+
+# Database credentials (this would trigger security warnings)
+DATABASE_URL = "postgresql://admin:super_secret_password@localhost/production_db"
+
+# API keys (high risk patterns)
+STRIPE_SECRET_KEY = "sk_live_51H7jF2SIoR89ruTYDiPiKQhPiJDmfzqsMzfUVokw"
+AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# Admin credentials
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"  # Weak password
+
+# Encryption keys
+ENCRYPTION_KEY = "YourSecretEncryptionKey123"
+JWT_SECRET = "super-secret-jwt-key-do-not-share"
+
+# External service URLs
+PAYMENT_WEBHOOK_URL = "https://api.example.com/webhook/payments"
+NOTIFICATION_SERVICE_URL = "https://notifications.internal.company.com"
+
+# Feature flags
+ENABLE_DEBUG_MODE = True
+BYPASS_AUTHENTICATION = False
+ALLOW_ADMIN_BYPASS = True
+EOF
+
+# Commit the risky file
 echo ""
-echo "6. Final status:"
-echo "   zed status --all"
+echo "📝 Committing potentially risky file..."
+sav commit -m "Add secrets configuration (DEMO - shows risk assessment)" src/app/secrets.py
+
+# Show final status
 echo ""
-echo "Take screenshots of commands 2 and 5 for the best demonstration."
+echo "📊 Final repository status:"
+sav status --all
+
 echo ""
-echo "To clean up: cd .. && rm -rf $DEMO_DIR" 
+echo "🎯 DEMO COMPLETE!"
+echo ""
+echo "This demo showed:"
+echo "  ✅ Repository initialization with 'sav init'"
+echo "  ✅ Multiple commits with realistic code"
+echo "  ✅ Risk assessment and policy evaluation"
+echo "  ✅ Repository status tracking"
+echo ""
+echo "Key Sav Shadow VCS features demonstrated:"
+echo "  🔍 Automatic risk scoring based on file content"
+echo "  🛡️  Policy-based commit approval workflow"
+echo "  📋 Comprehensive audit trail"
+echo "  🔒 Isolation of changes until human approval"
+echo ""
+echo "Next steps:"
+echo "  📝 Review commits: sav review <commit-id>"
+echo "  ✅ Approve safe commits: sav approve <commit-id>"
+echo "  ❌ Reject risky commits: sav reject <commit-id>"
+echo "  📊 Check status: sav status --all"
+echo ""
+echo "The risky secrets file will require manual review before approval!" 

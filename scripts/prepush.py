@@ -47,7 +47,7 @@ def backup_tests():
     if not tests_dir.exists():
         return None
     
-    backup_dir = Path(f"/tmp/zed-tests-backup-{tests_dir.stat().st_mtime_ns}")
+    backup_dir = Path(f"/tmp/sav-tests-backup-{tests_dir.stat().st_mtime_ns}")
     
     try:
         shutil.copytree(tests_dir, backup_dir)

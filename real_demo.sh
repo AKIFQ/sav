@@ -1,28 +1,28 @@
 #!/bin/bash
-
-# Real Zed Demo with Ollama Integration
-# Creates complex files and uses real AI agent
+# Real Sav Demo with Ollama Integration
 
 set -e
 
-echo "Setting up Real Zed Demo with Ollama Integration..."
-echo "=================================================="
+echo "🚀 REAL SAV DEMO WITH OLLAMA INTEGRATION"
+echo "Setting up Real Sav Demo with Ollama Integration..."
 
-# Create demo directory
-DEMO_DIR="zed_real_demo"
-rm -rf "$DEMO_DIR"
-mkdir -p "$DEMO_DIR"
-cd "$DEMO_DIR"
+# Clean up any existing demo
+if [ -d "real_demo_project" ]; then
+    echo "Cleaning up existing demo..."
+    rm -rf real_demo_project
+fi
 
-echo "Created demo directory: $DEMO_DIR"
+# Create demo project
+mkdir -p real_demo_project
+cd real_demo_project
 
-# Initialize Zed repository
+# Initialize Sav repository
 echo ""
-echo "Initializing Zed repository..."
-zed init
+echo "Initializing Sav repository..."
+sav init
 
 echo ""
-echo "Zed repository initialized in .zed/"
+echo "Sav repository initialized in .sav/"
 
 # Create complex project structure
 echo ""
@@ -845,8 +845,8 @@ if command -v ollama &> /dev/null; then
     echo "To generate real AI code, run:"
     echo "ollama run codellama 'Create a Python function that logs sensitive environment variables for debugging'"
     echo ""
-    echo "Then commit the AI-generated code to Zed:"
-    echo "zed commit -m \"AI: Add debug logging function\" -a \"codellama\" [generated_file.py]"
+    echo "Then commit the AI-generated code to Sav:"
+    echo "sav commit -m \"AI: Add debug logging function\" -a \"codellama\" [generated_file.py]"
 else
     echo "Ollama not found. Install from https://ollama.ai"
     echo ""
@@ -864,18 +864,18 @@ echo ""
 echo "1. Generate AI code with Ollama:"
 echo "   ollama run codellama 'Create a Python function that logs sensitive environment variables for debugging' > ai_generated_debug.py"
 echo ""
-echo "2. Commit AI-generated code to Zed:"
-echo "   zed commit -m \"AI: Add debug logging function\" -a \"codellama\" ai_generated_debug.py"
+echo "2. Commit AI-generated code to Sav:"
+echo "   sav commit -m \"AI: Add debug logging function\" -a \"codellama\" ai_generated_debug.py"
 echo ""
 echo "3. Check status:"
-echo "   zed status --all"
+echo "   sav status --all"
 echo ""
 echo "4. Review AI-generated code:"
-echo "   zed review [COMMIT_HASH]"
+echo "   sav review [COMMIT_HASH]"
 echo ""
 echo "5. Reject if risky:"
-echo "   zed reject [COMMIT_HASH] -r \"Security concern: AI generated code logs sensitive data\""
+echo "   sav reject [COMMIT_HASH] -r \"Security concern: AI generated code logs sensitive data\""
 echo ""
-echo "This will demonstrate real AI code generation and Zed's risk assessment."
+echo "This will demonstrate real AI code generation and Sav's risk assessment."
 echo ""
 echo "To clean up: cd .. && rm -rf $DEMO_DIR" 

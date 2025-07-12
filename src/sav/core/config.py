@@ -92,16 +92,15 @@ class ConfigManager:
         self._load_from_environment()
     
     def _get_global_config_path(self) -> Optional[Path]:
-        """Get path to global configuration file."""
-        # Check common locations
+        """Get the global configuration file path."""
         candidates = [
-            Path.home() / ".zed" / "config.yaml",
-            Path.home() / ".config" / "zed" / "config.yaml",
-            Path("/etc/zed/config.yaml"),
+            Path.home() / ".sav" / "config.yaml",
+            Path.home() / ".config" / "sav" / "config.yaml",
+            Path("/etc/sav/config.yaml"),
         ]
         
-        # Check ZED_CONFIG_PATH environment variable
-        env_path = os.getenv("ZED_CONFIG_PATH")
+        # Check SAV_CONFIG_PATH environment variable
+        env_path = os.getenv("SAV_CONFIG_PATH")
         if env_path:
             candidates.insert(0, Path(env_path))
         
@@ -128,60 +127,60 @@ class ConfigManager:
     def _load_from_environment(self):
         """Load configuration from environment variables."""
         # Global settings
-        if os.getenv("ZED_LOG_LEVEL"):
-            self._config.log_level = os.getenv("ZED_LOG_LEVEL").upper()
+        if os.getenv("SAV_LOG_LEVEL"):
+            self._config.log_level = os.getenv("SAV_LOG_LEVEL").upper()
         
-        if os.getenv("ZED_DEBUG"):
-            self._config.debug_mode = os.getenv("ZED_DEBUG").lower() in ("true", "1", "yes")
+        if os.getenv("SAV_DEBUG"):
+            self._config.debug_mode = os.getenv("SAV_DEBUG").lower() in ("true", "1", "yes")
         
         # Database settings
-        if os.getenv("ZED_DB_TIMEOUT"):
+        if os.getenv("SAV_DB_TIMEOUT"):
             try:
-                self._config.database.timeout_seconds = int(os.getenv("ZED_DB_TIMEOUT"))
+                self._config.database.timeout_seconds = int(os.getenv("SAV_DB_TIMEOUT"))
             except ValueError:
                 pass
         
-        if os.getenv("ZED_DB_CACHE_SIZE_MB"):
+        if os.getenv("SAV_DB_CACHE_SIZE_MB"):
             try:
-                self._config.database.cache_size_mb = int(os.getenv("ZED_DB_CACHE_SIZE_MB"))
+                self._config.database.cache_size_mb = int(os.getenv("SAV_DB_CACHE_SIZE_MB"))
             except ValueError:
                 pass
         
         # Security settings
-        if os.getenv("ZED_MAX_FILE_SIZE_MB"):
+        if os.getenv("SAV_MAX_FILE_SIZE_MB"):
             try:
-                self._config.security.max_file_size_mb = int(os.getenv("ZED_MAX_FILE_SIZE_MB"))
+                self._config.security.max_file_size_mb = int(os.getenv("SAV_MAX_FILE_SIZE_MB"))
             except ValueError:
                 pass
         
-        if os.getenv("ZED_AUTO_APPLY"):
-            self._config.security.auto_apply_enabled = os.getenv("ZED_AUTO_APPLY").lower() in ("true", "1", "yes")
+        if os.getenv("SAV_AUTO_APPLY"):
+            self._config.security.auto_apply_enabled = os.getenv("SAV_AUTO_APPLY").lower() in ("true", "1", "yes")
         
-        if os.getenv("ZED_AUTO_APPLY_RISK_THRESHOLD"):
+        if os.getenv("SAV_AUTO_APPLY_RISK_THRESHOLD"):
             try:
-                self._config.security.auto_apply_risk_threshold = float(os.getenv("ZED_AUTO_APPLY_RISK_THRESHOLD"))
+                self._config.security.auto_apply_risk_threshold = float(os.getenv("SAV_AUTO_APPLY_RISK_THRESHOLD"))
             except ValueError:
                 pass
         
         # Performance settings
-        if os.getenv("ZED_TEST_TIMEOUT"):
+        if os.getenv("SAV_TEST_TIMEOUT"):
             try:
-                self._config.performance.test_timeout_seconds = int(os.getenv("ZED_TEST_TIMEOUT"))
+                self._config.performance.test_timeout_seconds = int(os.getenv("SAV_TEST_TIMEOUT"))
             except ValueError:
                 pass
         
-        if os.getenv("ZED_METRICS_RETENTION_DAYS"):
+        if os.getenv("SAV_METRICS_RETENTION_DAYS"):
             try:
-                self._config.performance.metrics_retention_days = int(os.getenv("ZED_METRICS_RETENTION_DAYS"))
+                self._config.performance.metrics_retention_days = int(os.getenv("SAV_METRICS_RETENTION_DAYS"))
             except ValueError:
                 pass
         
         # Monitoring settings
-        if os.getenv("ZED_HEALTH_CHECK"):
-            self._config.monitoring.health_check_enabled = os.getenv("ZED_HEALTH_CHECK").lower() in ("true", "1", "yes")
+        if os.getenv("SAV_HEALTH_CHECK"):
+            self._config.monitoring.health_check_enabled = os.getenv("SAV_HEALTH_CHECK").lower() in ("true", "1", "yes")
         
-        if os.getenv("ZED_METRICS_COLLECTION"):
-            self._config.monitoring.metrics_collection_enabled = os.getenv("ZED_METRICS_COLLECTION").lower() in ("true", "1", "yes")
+        if os.getenv("SAV_METRICS_COLLECTION"):
+            self._config.monitoring.metrics_collection_enabled = os.getenv("SAV_METRICS_COLLECTION").lower() in ("true", "1", "yes")
     
     def _apply_config_dict(self, data: Dict[str, Any]):
         """Apply configuration from dictionary."""
@@ -289,26 +288,26 @@ class ConfigManager:
         """Get help text for environment variables."""
         return """
 Environment Variables:
-  ZED_CONFIG_PATH           Path to configuration file
-  ZED_LOG_LEVEL            Log level (DEBUG, INFO, WARNING, ERROR)
-  ZED_DEBUG                Enable debug mode (true/false)
+  SAV_CONFIG_PATH           Path to configuration file
+  SAV_LOG_LEVEL            Log level (DEBUG, INFO, WARNING, ERROR)
+  SAV_DEBUG                Enable debug mode (true/false)
   
   Database:
-  ZED_DB_TIMEOUT           Database timeout in seconds
-  ZED_DB_CACHE_SIZE_MB     Database cache size in MB
+  SAV_DB_TIMEOUT           Database timeout in seconds
+  SAV_DB_CACHE_SIZE_MB     Database cache size in MB
   
   Security:
-  ZED_MAX_FILE_SIZE_MB     Maximum file size for commits in MB
-  ZED_AUTO_APPLY           Enable auto-apply feature (true/false)
-  ZED_AUTO_APPLY_RISK_THRESHOLD  Risk threshold for auto-apply (0.0-1.0)
+  SAV_MAX_FILE_SIZE_MB     Maximum file size for commits in MB
+  SAV_AUTO_APPLY           Enable auto-apply feature (true/false)
+  SAV_AUTO_APPLY_RISK_THRESHOLD  Risk threshold for auto-apply (0.0-1.0)
   
   Performance:
-  ZED_TEST_TIMEOUT         Test command timeout in seconds
-  ZED_METRICS_RETENTION_DAYS  Days to retain metrics
+  SAV_TEST_TIMEOUT         Test command timeout in seconds
+  SAV_METRICS_RETENTION_DAYS  Days to retain metrics
   
   Monitoring:
-  ZED_HEALTH_CHECK         Enable health checks (true/false)
-  ZED_METRICS_COLLECTION   Enable metrics collection (true/false)
+  SAV_HEALTH_CHECK         Enable health checks (true/false)
+  SAV_METRICS_COLLECTION   Enable metrics collection (true/false)
 """
 
 

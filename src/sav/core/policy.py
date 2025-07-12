@@ -82,7 +82,7 @@ class PolicyManager:
     def __init__(self, repo):
         """Initialize policy manager with repository."""
         self.repo = repo
-        self.constraints_path = self.repo.zed_dir / "constraints.yaml"
+        self.constraints_path = self.repo.sav_dir / "constraints.yaml"
         self.rules: list[PolicyRule] = []
         self._load_rules()
 
@@ -149,7 +149,7 @@ class PolicyManager:
                 print(f"⚠️  Warning: Skipping invalid rule #{i+1} in {self.constraints_path.name}")
                 print(f"   Error: {e}")
                 print(f"   Rule: {rule_dict}")
-                print(f"   💡 Fix the rule syntax and run 'zed status' to reload")
+                print(f"   💡 Fix the rule syntax and run 'sav status' to reload")
 
     def evaluate(self, fingerprint, files: list[Path]) -> dict:
         """Evaluate policy rules against a commit fingerprint.

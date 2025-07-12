@@ -1,5 +1,5 @@
 [project]
-name = "zedai"
+name = "sav"
 version = "0.1.0"
 description = "A local-first staging VCS for AI agents - quarantine commits before merging to production Git"
 authors = [{name = "Shadow VCS Contributors"}]
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-zed = "zed.cli:main"
+sav = "sav.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

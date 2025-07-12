@@ -9,8 +9,8 @@ from typing import Optional
 
 from filelock import FileLock
 
-from zed.core.db import connect
-from zed.utils.diff import generate_file_diff
+from sav.core.db import connect
+from sav.utils.diff import generate_file_diff
 
 
 class Commit:
@@ -64,7 +64,7 @@ class CommitManager:
         self.repo = repo
         
         # Import here to avoid circular imports
-        from zed.core.config import get_config
+        from sav.core.config import get_config
         self.config = get_config(repo.path)
 
     def _atomic_write(self, target_path: Path, content: str):

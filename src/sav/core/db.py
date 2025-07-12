@@ -14,11 +14,11 @@ SCHEMA_VERSION = 2
 def connect(db_path: Path, repo_path: Optional[Path] = None) -> Generator[sqlite3.Connection, None, None]:
     """Connect to the SQLite database with configurable optimizations."""
     # Import here to avoid circular imports
-    from zed.core.config import get_config
+    from sav.core.config import get_config
     
     # Try to determine repo path from db_path if not provided
     if repo_path is None and db_path.name == "index.sqlite":
-        repo_path = db_path.parent.parent  # Go from .zed/index.sqlite to repo root
+        repo_path = db_path.parent.parent  # Go from .sav/index.sqlite to repo root
     
     config = get_config(repo_path)
     timeout = config.database.timeout_seconds

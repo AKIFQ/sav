@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from threading import Lock
 
-from zed.core.db import connect
+from sav.core.db import connect
 
 
 @dataclass
@@ -39,7 +39,7 @@ class MetricsCollector:
     def __init__(self, repo):
         """Initialize metrics collector."""
         self.repo = repo
-        self.metrics_file = repo.zed_dir / "metrics.json"
+        self.metrics_file = repo.sav_dir / "metrics.json"
         self._metrics: List[PerformanceMetric] = []
         self._lock = Lock()
         self._load_metrics()
@@ -179,20 +179,20 @@ class MetricsCollector:
         }
         
         # Check database integrity
-        from zed.core.db import verify_database_integrity
+        from sav.core.db import verify_database_integrity
         if not verify_database_integrity(self.repo.db_path):
             health['status'] = 'degraded'
             health['issues'].append('Database integrity check failed')
         
         # Check disk space
         try:
-            from zed.core.config import get_config
+            from sav.core.config import get_config
             config = get_config(self.repo.path)
             warning_threshold = config.monitoring.disk_space_warning_mb
             
-            stats = self.repo.zed_dir.stat()
+            stats = self.repo.sav_dir.stat()
             import shutil as shutil_disk
-            disk_usage = shutil_disk.disk_usage(self.repo.zed_dir)
+            disk_usage = shutil_disk.disk_usage(self.repo.sav_dir)
             free_mb = disk_usage.free / (1024 * 1024)
             
             if free_mb < warning_threshold:
@@ -204,7 +204,7 @@ class MetricsCollector:
         # Check for stale commits
         with connect(self.repo.db_path, self.repo.path) as conn:
             cursor = conn.cursor()
-            from zed.core.config import get_config
+            from sav.core.config import get_config
             config = get_config(self.repo.path)
             stale_days = config.monitoring.stale_commit_warning_days
             cutoff_time = int(time.time()) - (stale_days * 24 * 60 * 60)

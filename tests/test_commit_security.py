@@ -3,8 +3,8 @@ import time
 import threading
 from pathlib import Path
 
-from zed.core.commit import CommitManager
-from zed.core.repo import Repository
+from sav.core.commit import CommitManager
+from sav.core.repo import Repository
 
 @pytest.fixture
 

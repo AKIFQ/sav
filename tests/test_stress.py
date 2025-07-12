@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from zed.core.commit import CommitManager
-from zed.core.repo import Repository
+from sav.core.commit import CommitManager
+from sav.core.repo import Repository
 
 
 class TestStress:
@@ -109,7 +109,7 @@ class TestStress:
 
     def test_database_integrity_under_load(self, temp_repo):
         """Test database integrity with concurrent database operations."""
-        from zed.core.db import connect
+        from sav.core.db import connect
         
         # First create some actual commits to reference
         commit_mgr = CommitManager(temp_repo)
@@ -156,7 +156,7 @@ class TestStress:
 
     def test_rapid_status_checks(self, temp_repo):
         """Test rapid status checks don't cause issues."""
-        from zed.core.db import connect
+        from sav.core.db import connect
         
         # Create some commits first
         commit_mgr = CommitManager(temp_repo)

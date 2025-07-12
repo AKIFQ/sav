@@ -38,6 +38,6 @@ htmlcov/
 *~
 
 # Project specific
-.zed/
+.sav/
 *.log
 .DS_Store 

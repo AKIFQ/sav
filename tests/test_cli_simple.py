@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 
-from zed.cli import cli
+from sav.cli import cli
 
 
 class TestCLISimple:
@@ -85,12 +85,12 @@ class TestCLISimple:
             assert result.exit_code == 0
             assert "Initialized Shadow VCS repository" in result.output
             
-            # Verify .zed directory was created
-            assert Path(".zed").exists()
-            assert Path(".zed/commits").exists()
-            assert Path(".zed/fingerprints").exists()
-            assert Path(".zed/index.sqlite").exists()
-            assert Path(".zed/constraints.yaml").exists()
+            # Verify .sav directory was created
+            assert Path(".sav").exists()
+            assert Path(".sav/commits").exists()
+            assert Path(".sav/fingerprints").exists()
+            assert Path(".sav/index.sqlite").exists()
+            assert Path(".sav/constraints.yaml").exists()
 
     def test_basic_commit_flow(self):
         """Test basic commit flow."""

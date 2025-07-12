@@ -9,12 +9,12 @@ from typing import Optional
 
 import click
 
-from zed.core.commit import CommitManager
-from zed.core.fingerprint import FingerprintGenerator
-from zed.core.policy import PolicyManager
-from zed.core.repo import Repository
-from zed.core.metrics import MetricsCollector
-from zed.core.config import get_config, reload_config, ConfigManager
+from sav.core.commit import CommitManager
+from sav.core.fingerprint import FingerprintGenerator
+from sav.core.policy import PolicyManager
+from sav.core.repo import Repository
+from sav.core.metrics import MetricsCollector
+from sav.core.config import get_config, reload_config, ConfigManager
 
 # Standardized exit codes
 EXIT_SUCCESS = 0
@@ -41,7 +41,7 @@ def handle_error(error: Exception, operation: str):
 
 def _auto_apply_if_safe(repo: Repository, commit, fingerprint, policy_result: dict) -> bool:
     """Auto-apply changes for very safe commits."""
-    from zed.core.config import get_config
+    from sav.core.config import get_config
     
     config = get_config(repo.path)
     
@@ -72,7 +72,7 @@ def _auto_apply_if_safe(repo: Repository, commit, fingerprint, policy_result: di
     applied_files = _apply_commit_to_working_tree(repo, commit)
     
     # Update status in database
-    from zed.core.db import connect
+    from sav.core.db import connect
     with connect(repo.db_path, repo.path) as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -120,7 +120,7 @@ def _apply_commit_to_working_tree(repo: Repository, commit) -> list[Path]:
 def _run_test_command(test_cmd: str) -> bool:
     """Run test command and return success status."""
     import subprocess
-    from zed.core.config import get_config
+    from sav.core.config import get_config
     
     config = get_config()
     timeout = config.performance.test_timeout_seconds
@@ -157,7 +157,7 @@ def _run_test_command(test_cmd: str) -> bool:
 
 
 @click.group()
-@click.version_option(version="0.1.0", prog_name="zed")
+@click.version_option(version="0.1.0", prog_name="sav")
 def cli():
     """Shadow VCS - A local-first staging VCS for AI agents.
     
@@ -165,14 +165,14 @@ def cli():
     
     \b
     Quick Start:
-      zed init                    # Initialize repository
-      zed commit -m "msg" file.py # Create commit
-      zed status                  # Check pending reviews
-      zed review <commit-id>      # Review changes
-      zed approve <commit-id>     # Apply to working tree
+      sav init                    # Initialize repository
+      sav commit -m "msg" file.py # Create commit
+      sav status                  # Check pending reviews
+      sav review <commit-id>      # Review changes
+      sav approve <commit-id>     # Apply to working tree
     
     \b
-    Learn more: https://github.com/AKIFQ/zed
+    Learn more: https://github.com/AKIFQ/sav
     """
     pass
 
@@ -183,12 +183,12 @@ def version():
     import platform
     import sqlite3
     
-    click.echo("Shadow VCS (zed) version 0.1.0")
+    click.echo("Shadow VCS (sav) version 0.1.0")
     click.echo(f"Python {platform.python_version()} on {platform.system()}")
     click.echo(f"SQLite {sqlite3.sqlite_version}")
     click.echo()
     click.echo("A local-first staging VCS for AI agents")
-    click.echo("Repository: https://github.com/AKIFQ/zed")
+    click.echo("Repository: https://github.com/AKIFQ/sav")
     click.echo("License: MIT")
 
 
@@ -205,22 +205,22 @@ def init(path: Path):
     
     \b
     Examples:
-      zed init                    # Initialize in current directory
-      zed init /path/to/project   # Initialize in specific directory
+      sav init                    # Initialize in current directory
+      sav init /path/to/project   # Initialize in specific directory
     """
     try:
         repo = Repository(path)
         repo.init()
-        click.echo(f"✅ Initialized Shadow VCS repository in {path.resolve()}/.zed")
+        click.echo(f"✅ Initialized Shadow VCS repository in {path.resolve()}/.sav")
         click.echo()
         click.echo("Next steps:")
         click.echo("  1. Make some changes to your files")
-        click.echo("  2. Run: zed commit -m 'Your message' <files>")
-        click.echo("  3. Check status: zed status")
+        click.echo("  2. Run: sav commit -m 'Your message' <files>")
+        click.echo("  3. Check status: sav status")
     except Exception as e:
         if "already exists" in str(e):
             click.echo(f"❌ Error: {e}", err=True)
-            click.echo("💡 Tip: Use 'zed status' to see existing commits", err=True)
+            click.echo("💡 Tip: Use 'sav status' to see existing commits", err=True)
             sys.exit(EXIT_USER_ERROR)
         else:
             handle_error(e, "init")
@@ -255,10 +255,10 @@ def commit(message: str, author: str, test_cmd: Optional[str], files: tuple[Path
     
     \b
     Examples:
-      zed commit -m "Add feature" src/feature.py
-      zed commit -m "Update docs" README.md docs/
-      zed commit -m "AI: Refactored auth" -a "gpt-4" auth.py
-      zed commit -m "Fix bug" -t "pytest tests/" src/fix.py
+      sav commit -m "Add feature" src/feature.py
+      sav commit -m "Update docs" README.md docs/
+      sav commit -m "AI: Refactored auth" -a "gpt-4" auth.py
+      sav commit -m "Fix bug" -t "pytest tests/" src/fix.py
     """
     try:
         # Find repository
@@ -345,7 +345,7 @@ def commit(message: str, author: str, test_cmd: Optional[str], files: tuple[Path
                 status_icon = "🚀"
             else:
                 # Update commit status to approved (but not applied)
-                from zed.core.db import connect
+                from sav.core.db import connect
                 with connect(repo.db_path, repo.path) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
@@ -364,12 +364,12 @@ def commit(message: str, author: str, test_cmd: Optional[str], files: tuple[Path
         elif status == "waiting_review":
             click.echo()
             click.echo("💡 Next steps:")
-            click.echo(f"  zed review {commit.id[:8]}   # Review changes")
-            click.echo(f"  zed approve {commit.id[:8]}  # Apply to working tree")
+            click.echo(f"  sav review {commit.id[:8]}   # Review changes")
+            click.echo(f"  sav approve {commit.id[:8]}  # Apply to working tree")
         elif status == "approved":
             click.echo()
             click.echo("💡 Next step:")
-            click.echo(f"  zed approve {commit.id[:8]}  # Apply to working tree")
+            click.echo(f"  sav approve {commit.id[:8]}  # Apply to working tree")
         
     except Exception as e:
         handle_error(e, "commit")
@@ -387,13 +387,13 @@ def status(all: bool):
     
     \b
     Examples:
-      zed status          # Show pending reviews
-      zed status --all    # Show all commits
+      sav status          # Show pending reviews
+      sav status --all    # Show all commits
     """
     try:
         repo = _find_repository()
         
-        from zed.core.db import connect
+        from sav.core.db import connect
         with connect(repo.db_path, repo.path) as conn:
             cursor = conn.cursor()
             
@@ -414,7 +414,7 @@ def status(all: bool):
                 else:
                     click.echo("✨ No commits waiting for review.")
                     click.echo()
-                    click.echo("💡 Tip: Create a commit with 'zed commit -m \"message\" <files>'")
+                    click.echo("💡 Tip: Create a commit with 'sav commit -m \"message\" <files>'")
                 return
             
             # Display header
@@ -458,8 +458,8 @@ def review(commit_id: str):
     
     \b
     Examples:
-      zed review abc123           # Review commit abc123
-      zed review abc123 | less    # Pipe to pager for large diffs
+      sav review abc123           # Review commit abc123
+      sav review abc123 | less    # Pipe to pager for large diffs
     """
     try:
         repo = _find_repository()
@@ -527,8 +527,8 @@ def approve(commit_id: str, user: str):
     
     \b
     Examples:
-      zed approve abc123          # Approve with current user
-      zed approve abc123 -u john  # Approve as specific user
+      sav approve abc123          # Approve with current user
+      sav approve abc123 -u john  # Approve as specific user
     """
     try:
         repo = _find_repository()
@@ -554,7 +554,7 @@ def approve(commit_id: str, user: str):
         applied_files = _apply_commit_to_working_tree(repo, commit)
         
         # Update database
-        from zed.core.db import connect
+        from sav.core.db import connect
         with connect(repo.db_path, repo.path) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -606,8 +606,8 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
     
     \b
     Examples:
-      zed reject abc123                       # Reject with current user
-      zed reject abc123 -r "Security issue"  # Reject with reason
+      sav reject abc123                       # Reject with current user
+      sav reject abc123 -r "Security issue"  # Reject with reason
     """
     try:
         repo = _find_repository()
@@ -630,7 +630,7 @@ def reject(commit_id: str, user: str, reason: Optional[str]):
             sys.exit(EXIT_USER_ERROR)
         
         # Update database
-        from zed.core.db import connect
+        from sav.core.db import connect
         with connect(repo.db_path, repo.path) as conn:
             cursor = conn.cursor()
             cursor.execute(
@@ -733,7 +733,7 @@ def validate():
         
         if not constraints_path.exists():
             click.echo(f"❌ No constraints.yaml found at {constraints_path}")
-            click.echo("💡 Create one with 'zed init' or manually create the file")
+            click.echo("💡 Create one with 'sav init' or manually create the file")
             sys.exit(EXIT_USER_ERROR)
         
         click.echo(f"🔍 Validating {constraints_path}...")
@@ -937,11 +937,11 @@ def sample(output_path: Path):
         click.echo(f"✅ Sample configuration saved to {output_path}")
         click.echo()
         click.echo("Edit the file and place it in one of these locations:")
-        click.echo("  ~/.zed/config.yaml")
-        click.echo("  ~/.config/zed/config.yaml")
-        click.echo("  /etc/zed/config.yaml")
+        click.echo("  ~/.sav/config.yaml")
+        click.echo("  ~/.config/sav/config.yaml")
+        click.echo("  /etc/sav/config.yaml")
         click.echo()
-        click.echo("Or set ZED_CONFIG_PATH environment variable to specify a custom location.")
+        click.echo("Or set SAV_CONFIG_PATH environment variable to specify a custom location.")
         
     except Exception as e:
         handle_error(e, "config sample")
@@ -1000,14 +1000,14 @@ def _find_repository() -> Repository:
         error_msg += f"  {path}\n"
     if len(checked_paths) > 3:
         error_msg += f"  ... and {len(checked_paths) - 3} more\n"
-    error_msg += "\n💡 Run 'zed init' to create a repository"
+    error_msg += "\n💡 Run 'sav init' to create a repository"
     
     raise ValueError(error_msg)
 
 
 def _resolve_commit_id(repo: Repository, partial_id: str) -> str:
     """Resolve a partial commit ID to full ID."""
-    from zed.core.db import connect
+    from sav.core.db import connect
     
     with connect(repo.db_path, repo.path) as conn:
         cursor = conn.cursor()
