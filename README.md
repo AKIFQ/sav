@@ -104,7 +104,7 @@ zed reject a1b2c3d4 -r "Security concern"
 
 ---
 
-## 🛠️ Full Usage & Commands
+## Full Usage & Commands
 
 | Command | Description |
 |---------|-------------|
@@ -118,7 +118,7 @@ zed reject a1b2c3d4 -r "Security concern"
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Policy & Risk Assessment
 
@@ -158,7 +158,7 @@ zed policy test \
 
 ---
 
-## 📁 Directory Structure
+## Directory Structure
 
 ```
 .zed/
@@ -229,30 +229,12 @@ result = agent.run("Refactor the authentication module")
 
 ---
 
-## Roadmap
-
-- **v0.2:** LangChain/AI agent integration, Git auto-merge, Web UI, advanced risk heuristics
-- **v0.3:** Multi-user, custom plugins, Slack/Teams notifications, Git patch export
-
----
-
 ## License
 
 MIT License - see [LICENSE](LICENSE)
 
-## Support & Community
-
-- [GitHub Issues](https://github.com/AKIFQ/zed/issues)
-- [GitHub Discussions](https://github.com/AKIFQ/zed/discussions)
-- [Wiki](https://github.com/AKIFQ/zed/wiki)
-
-
-> **Shadow VCS** – Because AI agents need training wheels too! 🚀
+> **Shadow VCS** – Because AI agents need training wheels too! 
 
 ---
-
-<<<<<<< HEAD
 **If you like this project, please ⭐️ the repo and share your feedback!** 
-=======
-**Shadow VCS** - Because AI agents need training wheels too! 🚀 
->>>>>>> 04bbb81c76b4de63e70fdf4c16021eded33f14e7
+
