@@ -55,13 +55,17 @@ graph TD
 - Python 3.11+  
 - Git (for production workflows)
 
+**From PyPI:**
+```bash
+pip install savai
+```
+
 **From source:**
 ```bash
 git clone https://github.com/AKIFQ/sav.git
 cd sav
 pip install -e .
 ```
-**(PyPI coming soon!)**
 
 ### 2. Initialize a Shadow VCS Repo
 
