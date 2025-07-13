@@ -19,11 +19,11 @@ AI can write code, but it can also make mistakes, introduce security risks, or b
 
 ## Key Features
 
-- **Staging Isolation:** All changes land in `.sav/commits/*`—never in your main repo until approved.
-- **Audit-Grade Provenance:** Every commit is fingerprinted and logged in a tamper-resistant SQLite database. Full traceability: who/what/when/why for every change, even before it hits Git.
+- **Staging Isolation:** All changes land in `.sav/commits/*` never in your main repo until approved.
+- **Audit-Grade Provenance:** Every commit is fingerprinted and logged in a tamper resistant SQLite database. Full traceability: who/what/when/why for every change, even before it hits Git.
 - **Policy Driven Quarantine:** YAML rules let you auto-approve safe changes, block dangerous ones, and require human review for anything risky.
 - **Security by Default:** Detects secrets, large binaries, and suspicious patterns before they hit production.
-- **Human-in-the-Loop:** You decide what gets merged—AI agents can't sneak code past you.
+- **Human-in-the-Loop:** You decide what gets merged AI agents can't sneak code past you.
 - **Compliance & Forensics:** Prove to auditors that risky changes were reviewed and approved by a human. Every action is logged for compliance and incident response.
 - **AI Agent Safety:** Designed for AI/LLM workflows: keep agent output isolated until a human approves.
 - **Not Just Another Git Wrapper:** SAV is a staging VCS, not a Git plugin. It's a new layer of control *before* Git.
